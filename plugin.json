@@ -19,7 +19,6 @@
   ],
   "cross_plugin_access": [],
   "ui_slots": ["playerbar:menu", "mobile:home"],
-  "icon_url": "https://music.youtube.com/img/on_platform_logo_dark.svg",
   "category": "library",
   "tags": [
     "youtube",

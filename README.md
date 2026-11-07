@@ -1,61 +1,59 @@
-# YouTube Music Plugin for Audion
+# YouTube Music for Audion
 
-A full YouTube Music client plugin — browse the Home feed, Trending charts, search songs/albums/artists/playlists, navigate artist and album pages, and play tracks directly in Audion. No API key required.
+A plugin that adds YouTube Music to Audion. Browse the home feed and charts, search, open artist, album and playlist pages, and play tracks in the player. It needs no API key and no login.
 
-## Features
+## What it does
 
-- 🏠 **Home feed** — personalized shelves from YouTube Music (Recommended, Trending, Mixes, etc.)
-- 📈 **Trending** — global charts and hot tracks
-- 🔍 **Search** — songs, albums, artists, playlists with filter chips
-- 🎤 **Artist pages** — discography, singles, featured-on shelves
-- 💿 **Album / EP pages** — full track list with Play All
-- 📋 **Playlist pages** — community and editorial playlists
-- ▶️ **Playback** — streams via InnerTube (un-ciphered ANDROID/TV_EMBEDDED clients) → Piped → Invidious fallback chain
-- ➕ **Queue** — add any track to the queue without navigating away
-- 💾 **Library** — save tracks to your Audion library with one click
-- 🔀 **Cross-plugin search** — registers as a `youtube` search source for other plugins
-- ⚙️ **Settings** — configure custom Piped/Invidious instance lists
-
-## Stream Resolution Chain
-
-The plugin tries each backend in order, returning the first working audio URL:
-
-1. **InnerTube ANDROID_TESTSUITE** — un-ciphered, most reliable
-2. **InnerTube ANDROID** — standard Android client
-3. **InnerTube TV_EMBEDDED** — Namida's default (TVHTML5_SIMPLY_EMBEDDED_PLAYER)
-4. **Piped instances** — public Piped API (`/streams/:id`)
-5. **Invidious instances** — public Invidious API (`/api/v1/videos/:id`)
-
-Audio format preference: `m4a` (AAC) > `opus` (WebM), highest available bitrate.
+- Home feed with YouTube Music's shelves (recommended, trending, mixes)
+- Trending charts
+- Search for songs, albums, artists and playlists, with filter chips
+- Artist pages with albums, singles and featured-on shelves
+- Album and EP pages with a track list and Play All
+- Playlist pages, both editorial and community
+- Playback through InnerTube, with Piped and Invidious as fallbacks
+- Add to queue without leaving the current page
+- Save tracks to your Audion library in one click
+- Registers as a `youtube` search source that other plugins can query
+- Settings for custom Piped and Invidious instance lists
 
 ## Installation
 
-1. Copy this folder into your Audion plugins directory
-2. Audion will detect and load it automatically
-3. Click **YouTube Music** in the player bar to open
+1. Copy this folder into your Audion plugins directory.
+2. Restart Audion if it doesn't pick the plugin up on its own.
+3. Click **YouTube Music** in the player bar.
 
-## Permissions Required
+## How playback works
 
-| Permission | Purpose |
+For each track, the plugin tries these backends in order and uses the first audio URL that works:
+
+1. InnerTube `ANDROID_TESTSUITE`: returns un-ciphered URLs and is the most reliable
+2. InnerTube `ANDROID`
+3. InnerTube `TV_EMBEDDED` (`TVHTML5_SIMPLY_EMBEDDED_PLAYER`), the client Namida uses by default
+4. Piped instances, via `/streams/:id`
+5. Invidious instances, via `/api/v1/videos/:id`
+
+Format preference is `m4a` (AAC) over `opus` (WebM), at the highest available bitrate.
+
+## Permissions
+
+| Permission | Used for |
 |---|---|
-| `network:fetch` | CORS-free requests via Rust proxy |
-| `ui:inject` | Playerbar button + modal panel |
-| `player:control` | Playback, queue management |
-| `player:read` | Now-playing highlight sync |
-| `library:read` | Show which tracks are already saved |
-| `library:write` | Save tracks to Audion library |
-| `storage:local` | Persist settings and config |
+| `network:fetch` | Requests through the Rust proxy, which avoids CORS |
+| `ui:inject` | The player bar button and modal panel |
+| `player:control` | Playback and queue changes |
+| `player:read` | Highlighting the current track |
+| `library:read` | Marking tracks already in your library |
+| `library:write` | Saving tracks to your library |
+| `storage:local` | Storing settings |
 
-## API Used
+## Endpoints
 
-- **YouTube Music InnerTube** (`music.youtube.com/youtubei/v1`) with `WEB_REMIX` client — search, browse home/trending/artists/albums/playlists
-- **YouTube InnerTube** (`www.youtube.com/youtubei/v1`) with Android/TV clients — stream resolution (un-ciphered URLs)
-- **Piped/Invidious** — stream fallback when InnerTube returns ciphered URLs
+- `music.youtube.com/youtubei/v1` with the `WEB_REMIX` client: search, home, trending, and artist, album and playlist pages
+- `www.youtube.com/youtubei/v1` with the Android and TV clients: stream URL resolution
+- Piped and Invidious: fallback when InnerTube only returns ciphered URLs
 
-## Notes
+## Limitations
 
-- No login required — uses public InnerTube APIs
-- YouTube's ToS applies to stream extraction
-- Piped/Invidious instances may go down; configure alternatives in Settings
-- Home feed results may vary by region (default: US/EN)
-
+- Stream extraction is subject to YouTube's Terms of Service.
+- Public Piped and Invidious instances go down regularly. Add your own in Settings if playback starts failing.
+- Home feed content depends on region. The default is US/EN.

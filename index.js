@@ -138,6 +138,20 @@
     return null;
   }
 
+  function isDurationStr(txt) {
+    return /^\d{1,2}:\d{2}(?::\d{2})?$/.test((txt || '').trim());
+  }
+
+  function isStatOrType(txt) {
+    const t = (txt || '').trim();
+    if (!t) return true;
+    if (isDurationStr(t)) return true;
+    if (/^(Song|Video|Episode|Artist|Album|Playlist|Single|EP|Channel)$/i.test(t)) return true;
+    if (/^\d{4}$/.test(t)) return true; // year
+    if (/(views|plays|subscribers|listeners|monthly audience)/i.test(t)) return true;
+    return false;
+  }
+
   function parseDurationText(txt) {
     if (!txt) return 0;
     const p = String(txt).split(':').map(Number);
@@ -347,6 +361,12 @@
         const match = fullText.match(/\b\d{1,2}:\d{2}(?::\d{2})?\b/);
         if (match) duration = parseDurationText(match[0]);
       }
+      if (!duration && videoId && videoDurationCache.has(videoId)) {
+        duration = videoDurationCache.get(videoId);
+      }
+      if (duration > 0 && videoId) {
+        videoDurationCache.set(videoId, duration);
+      }
 
       // Subtitle/artist/album — col1 is usually "artist • album • year" runs
       // Filter out separator runs (• ·) and pick meaningful text
@@ -362,33 +382,44 @@
         const bId = bNav?.browseId;
         const runPT = bNav?.browseEndpointContextSupportedConfigs?.browseEndpointContextMusicConfig?.pageType;
         if (runPT?.includes('ARTIST') || (bId && bId.startsWith('UC'))) {
-          if (!artist) {
-            artist = run.text;
+          if (!artist && !isStatOrType(run.text)) {
+            artist = run.text.trim();
             artistBrowseId = bId;
           }
         } else if (runPT?.includes('ALBUM') || runPT?.includes('SINGLE') || (bId && bId.startsWith('MPRE'))) {
-          if (!album) {
-            album = run.text;
+          if (!album && !isStatOrType(run.text)) {
+            album = run.text.trim();
             albumBrowseId = bId;
           }
         }
       }
 
-      // If not found by endpoint tags, fall back to run text
+      // If not found by endpoint tags, fall back to run text without stats or durations
       if (!artist) {
         for (const run of col1Runs) {
           const text = run.text?.trim();
-          if (!text || text === 'Song' || text === 'Video' || text === 'Episode' || text === 'Artist' || text === 'Album' || text === 'Playlist') continue;
+          if (isStatOrType(text)) continue;
           artist = text;
           artistBrowseId = run.navigationEndpoint?.browseEndpoint?.browseId || null;
           break;
         }
       }
-      if (!album && col2Runs.length) {
-        const text = col2Runs[0].text?.trim();
-        if (text && !text.includes('plays') && !text.includes('views') && !/^\d{4}$/.test(text)) {
+      if (!artist && col2Runs.length) {
+        for (const run of col2Runs) {
+          const text = run.text?.trim();
+          if (isStatOrType(text)) continue;
+          artist = text;
+          artistBrowseId = run.navigationEndpoint?.browseEndpoint?.browseId || null;
+          break;
+        }
+      }
+      if (!album) {
+        for (const run of [...col1Runs, ...col2Runs]) {
+          const text = run.text?.trim();
+          if (isStatOrType(text) || text === artist) continue;
           album = text;
-          albumBrowseId = col2Runs[0].navigationEndpoint?.browseEndpoint?.browseId || null;
+          albumBrowseId = run.navigationEndpoint?.browseEndpoint?.browseId || null;
+          break;
         }
       }
 
@@ -488,11 +519,36 @@
                          card.onTap?.browseEndpoint?.browseId;
         const pageType = card.title?.runs?.[0]?.navigationEndpoint?.browseEndpoint?.browseEndpointContextSupportedConfigs?.browseEndpointContextMusicConfig?.pageType ||
                          card.onTap?.browseEndpoint?.browseEndpointContextSupportedConfigs?.browseEndpointContextMusicConfig?.pageType;
+        const videoId = card.onTap?.watchEndpoint?.videoId ||
+                        card.title?.runs?.[0]?.navigationEndpoint?.watchEndpoint?.videoId ||
+                        card.buttons?.find(b => b.musicPlayButtonRenderer)?.musicPlayButtonRenderer?.playNavigationEndpoint?.watchEndpoint?.videoId || null;
+
+        const cardSubRuns = card.subtitle?.runs || [];
+        let cardArtist = '';
+        let cardDuration = 0;
+        for (const r of cardSubRuns) {
+          const t = r.text?.trim() || '';
+          if (!cardArtist && !isStatOrType(t)) {
+            cardArtist = t;
+          }
+          if (!cardDuration) {
+            const d = parseDurationText(t);
+            if (d > 0) cardDuration = d;
+          }
+        }
+        if (!cardDuration && typeof subtitle === 'string') {
+          const m = subtitle.match(/\b\d{1,2}:\d{2}(?::\d{2})?\b/);
+          if (m) cardDuration = parseDurationText(m[0]);
+        }
+        if (videoId && cardDuration > 0) {
+          videoDurationCache.set(videoId, cardDuration);
+        }
+
         const topTracks = (card.contents || []).map(parseMusicItem).filter(Boolean);
         sections.push({
           _type: 'card-hero',
           title: 'Top Result',
-          item: { title, subtitle, thumb, browseId, pageType },
+          item: { title, subtitle, thumb, browseId, pageType, videoId, artist: cardArtist, duration: cardDuration },
           items: topTracks
         });
       } else if (c.itemSectionRenderer) {
@@ -526,33 +582,75 @@
     return collectSections(data);
   }
 
+  function findHeaderRenderer(data) {
+    if (data?.header?.musicResponsiveHeaderRenderer) return { type: 'responsive', h: data.header.musicResponsiveHeaderRenderer };
+    if (data?.header?.musicDetailHeaderRenderer) return { type: 'detail', h: data.header.musicDetailHeaderRenderer };
+    if (data?.header?.musicImmersiveHeaderRenderer) return { type: 'immersive', h: data.header.musicImmersiveHeaderRenderer };
+    if (data?.header?.musicVisualHeaderRenderer) return { type: 'visual', h: data.header.musicVisualHeaderRenderer };
+    if (data?.header?.musicEditablePlaylistDetailHeaderRenderer?.header?.musicDetailHeaderRenderer) {
+      return { type: 'detail', h: data.header.musicEditablePlaylistDetailHeaderRenderer.header.musicDetailHeaderRenderer };
+    }
+    const contents = data?.contents?.twoColumnBrowseResultsRenderer?.tabs?.[0]?.tabRenderer?.content?.sectionListRenderer?.contents ||
+                     data?.contents?.singleColumnBrowseResultsRenderer?.tabs?.[0]?.tabRenderer?.content?.sectionListRenderer?.contents ||
+                     data?.contents?.sectionListRenderer?.contents || [];
+    for (const c of contents) {
+      if (c.musicResponsiveHeaderRenderer) return { type: 'responsive', h: c.musicResponsiveHeaderRenderer };
+      if (c.musicDetailHeaderRenderer) return { type: 'detail', h: c.musicDetailHeaderRenderer };
+    }
+    return null;
+  }
+
   function parseArtistPage(data, browseId) {
-    const header = data?.header?.musicImmersiveHeaderRenderer || data?.header?.musicVisualHeaderRenderer;
+    const res = findHeaderRenderer(data);
+    const header = res?.h;
     const name   = getText(header?.title);
-    const thumb  = bestThumb(header?.thumbnail?.musicThumbnailRenderer?.thumbnail?.thumbnails ||
-                             header?.foregroundThumbnail?.musicThumbnailRenderer?.thumbnail?.thumbnails);
+    const thumb  = bestThumb(
+      header?.thumbnail?.musicThumbnailRenderer?.thumbnail?.thumbnails ||
+      header?.foregroundThumbnail?.musicThumbnailRenderer?.thumbnail?.thumbnails
+    );
     const sections = parseBrowse(data);
+    for (const s of sections) {
+      if (s.items) {
+        for (const item of s.items) {
+          if (item.videoId && (!item.artist || isStatOrType(item.artist))) {
+            item.artist = name;
+          }
+        }
+      }
+    }
     return { type: 'artist', name, thumb, browseId, sections };
   }
 
   function parseAlbumPage(data, browseId) {
-    const header  = data?.header?.musicDetailHeaderRenderer || data?.header?.musicImmersiveHeaderRenderer;
+    const res = findHeaderRenderer(data);
+    const header  = res?.h;
     const title   = getText(header?.title);
+    let artist = '';
+    let artistBrowseId = null;
+
+    if (header?.straplineTextOne) {
+      artist = getText(header.straplineTextOne);
+      artistBrowseId = header.straplineTextOne?.runs?.[0]?.navigationEndpoint?.browseEndpoint?.browseId || null;
+    }
     const subRuns = header?.subtitle?.runs || [];
-    const artistRun = subRuns.find(r => r.navigationEndpoint?.browseEndpoint?.browseId);
-    const artist  = subRuns.filter(r => r.navigationEndpoint?.browseEndpoint).map(r => r.text).join('') ||
-                    getText(header?.subtitle);
-    const artistBrowseId = artistRun?.navigationEndpoint?.browseEndpoint?.browseId || null;
-    const year    = subRuns.find(r => /^\d{4}$/.test(r.text?.trim()))?.text;
-    const thumb   = bestThumb(
+    if (!artist) {
+      const artistRun = subRuns.find(r => r.navigationEndpoint?.browseEndpoint?.browseId);
+      artist = subRuns.filter(r => r.navigationEndpoint?.browseEndpoint).map(r => r.text).join('') ||
+               getText(header?.subtitle);
+      artistBrowseId = artistRun?.navigationEndpoint?.browseEndpoint?.browseId || null;
+    }
+    const year = subRuns.find(r => /^\d{4}$/.test(r.text?.trim()))?.text;
+    const thumb = bestThumb(
       header?.thumbnail?.croppedSquareThumbnailRenderer?.thumbnail?.thumbnails ||
       header?.thumbnail?.musicThumbnailRenderer?.thumbnail?.thumbnails
     );
-    // Collect tracks via generic section collector — far more robust
+    // Collect tracks via generic section collector
     const sections = collectSections(data);
     const trackSection = sections.find(s => s.items.some(i => i.videoId));
     const tracks = (trackSection?.items || []).map((p, idx) => ({
-      ...p, trackNumber: idx + 1,
+      ...p,
+      trackNumber: idx + 1,
+      artist: (p.artist && !isStatOrType(p.artist)) ? p.artist : (artist || 'Unknown Artist'),
       album: p.album || title,
       albumArtist: p.albumArtist || artist,
       thumb: p.thumb || thumb,
@@ -562,10 +660,10 @@
   }
 
   function parsePlaylistPage(data, browseId) {
-    const header = data?.header?.musicDetailHeaderRenderer ||
-                   data?.header?.musicEditablePlaylistDetailHeaderRenderer?.header?.musicDetailHeaderRenderer;
+    const res = findHeaderRenderer(data);
+    const header = res?.h;
     const title  = getText(header?.title);
-    const owner  = getText(header?.subtitle);
+    const owner  = getText(header?.straplineTextOne) || getText(header?.subtitle);
     const thumb  = bestThumb(
       header?.thumbnail?.croppedSquareThumbnailRenderer?.thumbnail?.thumbnails ||
       header?.thumbnail?.musicThumbnailRenderer?.thumbnail?.thumbnails
@@ -575,6 +673,7 @@
     const trackSection = sections.find(s => s.items.some(i => i.videoId));
     const tracks = (trackSection?.items || []).map(p => ({
       ...p,
+      artist: (p.artist && !isStatOrType(p.artist)) ? p.artist : (owner || 'Unknown Artist'),
       album: p.album || title,
       thumb: p.thumb || thumb,
     }));
@@ -1818,8 +1917,10 @@
         if (!item.videoId) return;
         const inLib = this.libraryIds.has(item.videoId);
         const isPlaying = item.videoId === this._playingVideoId;
-        const dur = item.duration ? `<div class="ytm-track-dur">${esc(fmtDuration(item.duration))}</div>` : '';
+        const trackDuration = item.duration || videoDurationCache.get(item.videoId) || 0;
+        const dur = trackDuration ? `<div class="ytm-track-dur">${esc(fmtDuration(trackDuration))}</div>` : '';
         const thumb = item.thumb || ytThumb(item.videoId);
+        const fallbackThumb = ytThumb(item.videoId);
         const explicit = item.isExplicit ? `<span class="ytm-explicit" title="Explicit">E</span>` : '';
 
         const row = document.createElement('div');
@@ -1830,7 +1931,7 @@
         row.setAttribute('aria-label', `Play ${item.title} by ${item.artist || 'Unknown'}`);
         row.innerHTML = `
           <div class="ytm-thumb-wrap${showNumbers ? ' with-num' : ''}">
-            ${showNumbers ? `<span class="ytm-track-num">${item.trackNumber || (idx + 1)}</span>` : `<img class="ytm-thumb" src="${esc(thumb)}" alt="" loading="lazy" onerror="this.style.background='#1a1a1a'">`}
+            ${showNumbers ? `<span class="ytm-track-num">${item.trackNumber || (idx + 1)}</span>` : `<img class="ytm-thumb" src="${esc(thumb)}" alt="" loading="lazy" onerror="this.onerror=null; this.src='${fallbackThumb}'">`}
             <div class="ytm-play-ov">${isPlaying ? ICON.pause : ICON.play}</div>
           </div>
           <div class="ytm-track-info">
@@ -2058,11 +2159,12 @@
         if (!isCurrentlySaved) {
           for (const t of album.tracks) {
             if (!t.videoId) continue;
+            const dur = t.duration || videoDurationCache.get(t.videoId) || null;
             await this.api.library.addExternalTrack({
               title:       t.title,
-              artist:      t.artist || album.artist,
+              artist:      t.artist || album.artist || 'Unknown Artist',
               album:       album.title,
-              duration:    t.duration || null,
+              duration:    dur || null,
               cover_url:   album.thumb || t.thumb || ytThumb(t.videoId),
               source_type: SOURCE_TYPE,
               external_id: t.videoId,
@@ -2174,11 +2276,12 @@
 
         for (const t of playlist.tracks) {
           if (!t.videoId) continue;
+          const dur = t.duration || videoDurationCache.get(t.videoId) || null;
           const trackId = await this.api.library.addExternalTrack({
             title:       t.title,
-            artist:      t.artist || playlist.owner || '',
+            artist:      t.artist || playlist.owner || 'Unknown Artist',
             album:       t.album || playlist.title,
-            duration:    t.duration || null,
+            duration:    dur || null,
             cover_url:   playlist.thumb || t.thumb || ytThumb(t.videoId),
             source_type: SOURCE_TYPE,
             external_id: t.videoId,
@@ -2343,11 +2446,27 @@
             btn.setAttribute('aria-label', 'Add to Library');
           }
         } else {
+          let dur = track.duration || videoDurationCache.get(track.videoId) || null;
+          if ((!dur || dur <= 0) && track.videoId) {
+            try {
+              const watchData = await API.getWatchPlaylist(track.videoId, null, (u, o) => this._apiFetch(u, o));
+              if (watchData && watchData.length && watchData[0].duration > 0) {
+                dur = watchData[0].duration;
+                track.duration = dur;
+                videoDurationCache.set(track.videoId, dur);
+              }
+            } catch (_) {}
+          }
+          if (dur && rowEl) {
+            const durEl = rowEl.querySelector('.ytm-track-dur');
+            if (durEl) durEl.textContent = fmtDuration(dur);
+          }
+
           await this.api.library.addExternalTrack({
             title:       track.title,
-            artist:      track.artist || '',
+            artist:      track.artist || 'Unknown Artist',
             album:       track.album  || '',
-            duration:    track.duration || null,
+            duration:    dur || null,
             cover_url:   track.thumb || ytThumb(track.videoId),
             source_type: SOURCE_TYPE,
             external_id: track.videoId,

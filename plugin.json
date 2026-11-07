@@ -1,0 +1,38 @@
+{
+  "name": "YouTube Music",
+  "safe_name": "youtube-music",
+  "version": "1.0.0",
+  "author": "Audion Community",
+  "description": "Full YouTube Music client — browse Home, Hot Tracks, Trending, search artists/albums/playlists, play and save tracks. Uses YouTube Music InnerTube API (WEB_REMIX) + Piped/Invidious/InnerTube stream fallback chain. No API key required.",
+  "repo": "https://github.com/audion-plugins/youtube-music",
+  "manifest_url": null,
+  "type": "js",
+  "entry": "index.js",
+  "permissions": [
+    "network:fetch",
+    "ui:inject",
+    "player:control",
+    "player:read",
+    "library:read",
+    "library:write",
+    "storage:local"
+  ],
+  "cross_plugin_access": [],
+  "ui_slots": ["playerbar:menu", "mobile:home"],
+  "icon": null,
+  "icon_url": "https://music.youtube.com/img/on_platform_logo_dark.svg",
+  "category": "library",
+  "tags": [
+    "youtube",
+    "youtube-music",
+    "streaming",
+    "search",
+    "music",
+    "playlists",
+    "albums",
+    "artists",
+    "trending"
+  ],
+  "license": "MIT"
+}
+

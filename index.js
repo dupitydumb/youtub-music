@@ -94,6 +94,9 @@
     list:    `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>`,
     sync:    `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/></svg>`,
     settings:`<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>`,
+    import:  `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>`,
+    link:    `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>`,
+    check:   `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`,
   };
 
   // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -110,7 +113,7 @@
   }
 
   function ytThumb(videoId, q = 'mqdefault') {
-    return `https://i.ytimg.com/vi/${videoId}/${q}.jpg`;
+    return `https://i.ytimg.com/vi/${videoId}/${q || 'mqdefault'}.jpg`;
   }
 
   function bestThumb(thumbnails) {
@@ -158,6 +161,135 @@
     if (p.length === 3) return p[0]*3600 + p[1]*60 + p[2];
     if (p.length === 2) return p[0]*60 + p[1];
     return 0;
+  }
+
+  function parseYouTubeUrl(urlOrId) {
+    if (!urlOrId || typeof urlOrId !== 'string') return null;
+    const str = urlOrId.trim();
+
+    // 1. Raw IDs:
+    // Playlists: PL..., OLAK5uy_..., RD..., VL...
+    if (/^(VL)?(PL|OLAK5uy_|RD|UU|FL|LL)[a-zA-Z0-9_-]+$/.test(str)) {
+      const listId = str.startsWith('VL') ? str.slice(2) : str;
+      return { type: 'playlist', listId, browseId: `VL${listId}` };
+    }
+    // Album browseId: MPREb_...
+    if (/^MPREb_[a-zA-Z0-9_-]+$/.test(str)) {
+      return { type: 'album', browseId: str };
+    }
+    // Video ID: exactly 11 characters
+    if (/^[a-zA-Z0-9_-]{11}$/.test(str)) {
+      return { type: 'track', videoId: str };
+    }
+
+    try {
+      const urlToParse = /^[a-zA-Z]+:\/\//.test(str) ? str : `https://${str}`;
+      const u = new URL(urlToParse);
+      const host = u.hostname.toLowerCase();
+      if (!host.includes('youtube.com') && !host.includes('youtu.be')) {
+        return null;
+      }
+
+      const listParam = u.searchParams.get('list');
+      const vParam = u.searchParams.get('v');
+
+      // Playlist in query parameter
+      if (listParam) {
+        const cleanListId = listParam.startsWith('VL') ? listParam.slice(2) : listParam;
+        return {
+          type: 'playlist',
+          listId: cleanListId,
+          browseId: `VL${cleanListId}`,
+          videoId: vParam || null,
+        };
+      }
+
+      // youtu.be/VIDEO_ID
+      if (host.includes('youtu.be')) {
+        const vid = u.pathname.slice(1).split('/')[0].split('?')[0];
+        if (vid && vid.length === 11) {
+          return { type: 'track', videoId: vid };
+        }
+      }
+
+      // /watch?v=VIDEO_ID
+      if (vParam && vParam.length === 11) {
+        return { type: 'track', videoId: vParam };
+      }
+
+      // /browse/MPREb_... (Album) or /browse/VLPL... or /browse/UC...
+      if (u.pathname.startsWith('/browse/')) {
+        const browseId = u.pathname.replace('/browse/', '').split('/')[0];
+        if (browseId.startsWith('MPRE')) return { type: 'album', browseId };
+        if (browseId.startsWith('UC')) return { type: 'artist', browseId };
+        if (browseId.startsWith('VL') || browseId.startsWith('PL')) {
+          const listId = browseId.startsWith('VL') ? browseId.slice(2) : browseId;
+          return { type: 'playlist', listId, browseId: `VL${listId}` };
+        }
+      }
+
+      // /channel/UC...
+      if (u.pathname.startsWith('/channel/')) {
+        const artistId = u.pathname.replace('/channel/', '').split('/')[0];
+        return { type: 'artist', browseId: artistId };
+      }
+    } catch (_) {
+      return null;
+    }
+
+    return null;
+  }
+
+  function extractContinuationToken(r) {
+    if (!r) return null;
+    if (Array.isArray(r.continuations) && r.continuations.length) {
+      const c = r.continuations[0];
+      if (c?.nextContinuationData?.continuation) return c.nextContinuationData.continuation;
+      if (c?.reloadContinuationData?.continuation) return c.reloadContinuationData.continuation;
+    }
+    if (Array.isArray(r.contents)) {
+      for (const item of r.contents) {
+        if (item?.continuationItemRenderer?.continuationEndpoint?.continuationCommand?.token) {
+          return item.continuationItemRenderer.continuationEndpoint.continuationCommand.token;
+        }
+      }
+    }
+    return null;
+  }
+
+  function findShelfContinuationToken(data) {
+    if (!data || typeof data !== 'object') return null;
+    let found = null;
+    function walk(o, depth = 0) {
+      if (!o || typeof o !== 'object' || depth > 10 || found) return;
+      if (o.musicPlaylistShelfRenderer) {
+        const t = extractContinuationToken(o.musicPlaylistShelfRenderer);
+        if (t) { found = t; return; }
+      }
+      if (o.musicShelfRenderer) {
+        const t = extractContinuationToken(o.musicShelfRenderer);
+        if (t) { found = t; return; }
+      }
+      if (Array.isArray(o.continuations)) {
+        for (const c of o.continuations) {
+          if (c?.nextContinuationData?.continuation) { found = c.nextContinuationData.continuation; return; }
+          if (c?.reloadContinuationData?.continuation) { found = c.reloadContinuationData.continuation; return; }
+        }
+      }
+      if (o.continuationItemRenderer?.continuationEndpoint?.continuationCommand?.token) {
+        found = o.continuationItemRenderer.continuationEndpoint.continuationCommand.token;
+        return;
+      }
+      if (Array.isArray(o)) {
+        for (const el of o) walk(el, depth + 1);
+      } else {
+        for (const k of Object.keys(o)) {
+          if (k !== '_raw') walk(o[k], depth + 1);
+        }
+      }
+    }
+    walk(data);
+    return found;
   }
 
   // ─── Cache ───────────────────────────────────────────────────────────────────
@@ -340,7 +472,10 @@
                          ?.browseEndpointContextMusicConfig?.pageType;
 
       // Thumbnail
-      const thumb = bestThumb(listItem.thumbnail?.musicThumbnailRenderer?.thumbnail?.thumbnails);
+      const thumb = bestThumb(
+        listItem.thumbnail?.musicThumbnailRenderer?.thumbnail?.thumbnails ||
+        listItem.thumbnail?.croppedSquareThumbnailRenderer?.thumbnail?.thumbnails
+      ) || (videoId ? ytThumb(videoId, 'hqdefault') : null);
 
       // Duration from fixedColumns, lengthText, or runs
       let duration = parseDurationText(
@@ -483,8 +618,55 @@
     },
 
     async getPlaylist(browseId, apiFetch) {
-      const data = await ytmPost('browse', { browseId }, apiFetch);
-      return parsePlaylistPage(data, browseId);
+      const bid = (browseId.startsWith('VL') || browseId.startsWith('MPRE')) ? browseId : `VL${browseId}`;
+      const data = await ytmPost('browse', { browseId: bid }, apiFetch);
+      return parsePlaylistPage(data, bid);
+    },
+
+    async getPlaylistAllTracks(browseId, apiFetch, onProgress = null, maxTracks = 500) {
+      const bid = (browseId.startsWith('VL') || browseId.startsWith('MPRE')) ? browseId : `VL${browseId}`;
+      const firstPage = await this.getPlaylist(bid, apiFetch);
+      const allTracks = [...(firstPage.tracks || [])];
+      let token = firstPage.continuationToken;
+
+      onProgress?.({ loaded: allTracks.length, hasMore: Boolean(token) });
+
+      while (token && allTracks.length < maxTracks) {
+        try {
+          const contData = await ytmPost(`browse?continuation=${encodeURIComponent(token)}`, { continuation: token }, apiFetch);
+          const cont = contData?.continuationContents?.musicPlaylistShelfContinuation ||
+                       contData?.continuationContents?.musicShelfContinuation;
+          if (!cont || !cont.contents?.length) break;
+
+          let added = 0;
+          for (const itemWrapper of cont.contents) {
+            const p = parseMusicItem(itemWrapper);
+            if (p && p.videoId) {
+              allTracks.push({
+                ...p,
+                artist: (p.artist && !isStatOrType(p.artist)) ? p.artist : (firstPage.owner || 'Unknown Artist'),
+                album:  p.album || firstPage.title,
+                thumb:  p.thumb || (p.videoId ? ytThumb(p.videoId, 'hqdefault') : null) || firstPage.thumb,
+              });
+              added++;
+            }
+          }
+          if (added === 0) break;
+
+          token = findShelfContinuationToken(contData);
+          onProgress?.({ loaded: allTracks.length, hasMore: Boolean(token) });
+        } catch (err) {
+          console.warn(`${PLUGIN_LABEL} continuation failed:`, err);
+          break;
+        }
+      }
+
+      return {
+        ...firstPage,
+        tracks: allTracks,
+        hasMore: Boolean(token),
+        continuationToken: token,
+      };
     },
 
     async getWatchPlaylist(videoId, playlistId, apiFetch) {
@@ -653,7 +835,7 @@
       artist: (p.artist && !isStatOrType(p.artist)) ? p.artist : (artist || 'Unknown Artist'),
       album: p.album || title,
       albumArtist: p.albumArtist || artist,
-      thumb: p.thumb || thumb,
+      thumb: p.thumb || (p.videoId ? ytThumb(p.videoId, 'hqdefault') : null) || thumb,
       artistBrowseId: p.artistBrowseId || artistBrowseId,
     }));
     return { type: 'album', title, artist, artistBrowseId, year, thumb, browseId, tracks };
@@ -675,9 +857,10 @@
       ...p,
       artist: (p.artist && !isStatOrType(p.artist)) ? p.artist : (owner || 'Unknown Artist'),
       album: p.album || title,
-      thumb: p.thumb || thumb,
+      thumb: p.thumb || (p.videoId ? ytThumb(p.videoId, 'hqdefault') : null) || thumb,
     }));
-    return { type: 'playlist', title, owner, thumb, browseId, tracks };
+    const continuationToken = findShelfContinuationToken(data);
+    return { type: 'playlist', title, owner, thumb, browseId, tracks, continuationToken };
   }
 
   function parseWatchPlaylist(data) {
@@ -1232,6 +1415,77 @@
     .ytm-add-btn:hover { border-color: var(--ytm-red, #ff0033); color: #fff; }
     .ytm-divider { border: none; border-top: 1px solid var(--border-color, #333333); margin: 20px 0; }
 
+    /* ═══ Import Modal ═══ */
+    #ytm-import-modal {
+      position: absolute; inset: 0; background: var(--bg-elevated, #181818);
+      border-radius: var(--radius-lg, 12px); z-index: 35; display: flex; flex-direction: column;
+      opacity: 0; visibility: hidden; transform: translateY(8px);
+      transition: all var(--transition-fast, 150ms ease);
+    }
+    #ytm-import-modal.open { opacity: 1; visibility: visible; transform: translateY(0); }
+    .ytm-import-body { flex: 1; overflow-y: auto; padding: 20px 24px; display: flex; flex-direction: column; gap: 16px; }
+    .ytm-import-input-section { display: flex; flex-direction: column; gap: 6px; }
+    .ytm-import-bar { display: flex; gap: 8px; align-items: center; }
+    .ytm-import-input-wrap { position: relative; flex: 1; display: flex; align-items: center; }
+    .ytm-import-input-wrap .ytm-text-input { padding-left: 36px; }
+    .ytm-import-link-icon { position: absolute; left: 12px; color: var(--text-subdued, #888); display: flex; pointer-events: none; }
+    .ytm-import-card {
+      background: var(--bg-surface, #222222); border: 1px solid var(--border-color, #383838);
+      border-radius: var(--radius-md, 8px); padding: 16px; display: flex; flex-direction: column; gap: 14px;
+    }
+    .ytm-import-hero { display: flex; gap: 16px; align-items: flex-start; }
+    .ytm-import-thumb { width: 90px; height: 90px; border-radius: var(--radius-md, 8px); object-fit: cover; flex-shrink: 0; background: #2c2c2c; }
+    .ytm-import-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+    .ytm-import-title-static { font-size: 16px; font-weight: 700; color: #fff; line-height: 1.3; }
+    .ytm-import-title-input { font-size: 14px; font-weight: 600; padding: 8px 10px; font-family: inherit; }
+    .ytm-import-sub { font-size: 12px; color: var(--text-secondary, #b3b3b3); display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+    .ytm-dot { opacity: 0.5; }
+    .ytm-import-actions-bar {
+      display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;
+      padding-top: 10px; border-top: 1px solid var(--border-color, #333333);
+    }
+    .ytm-checkbox-label { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; cursor: pointer; user-select: none; }
+    .ytm-checkbox-label input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; accent-color: var(--ytm-red, #ff0033); }
+    .ytm-import-action-buttons { display: flex; gap: 8px; align-items: center; }
+    .ytm-import-track-list {
+      display: flex; flex-direction: column; gap: 2px; max-height: 300px; overflow-y: auto;
+      background: var(--bg-base, #121212); border-radius: var(--radius-sm, 6px); padding: 6px;
+      border: 1px solid var(--border-color, #2a2a2a);
+    }
+    .ytm-import-track-row {
+      display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: var(--radius-sm, 4px);
+      transition: background var(--transition-fast, 100ms ease);
+    }
+    .ytm-import-track-row:hover { background: rgba(255, 255, 255, 0.06); }
+    .ytm-import-track-row input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; accent-color: var(--ytm-red, #ff0033); }
+    .ytm-import-track-num { font-size: 12px; color: var(--text-subdued, #777); width: 24px; text-align: center; }
+    .ytm-import-track-thumb { width: 34px; height: 34px; border-radius: 4px; object-fit: cover; flex-shrink: 0; }
+    .ytm-import-track-meta { flex: 1; min-width: 0; }
+    .ytm-import-track-title { font-size: 13px; font-weight: 500; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .ytm-import-track-sub { font-size: 11px; color: var(--text-secondary, #aaa); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .ytm-import-track-dur { font-size: 12px; color: var(--text-subdued, #888); font-variant-numeric: tabular-nums; }
+    .ytm-import-progress-wrap {
+      display: flex; flex-direction: column; gap: 8px; padding: 12px; background: rgba(0,0,0,0.25);
+      border-radius: var(--radius-md, 6px); border: 1px solid var(--border-color, #333);
+    }
+    .ytm-progress-bar-bg { width: 100%; height: 8px; background: #333; border-radius: 4px; overflow: hidden; }
+    .ytm-progress-bar-fill { height: 100%; background: var(--ytm-red, #ff0033); transition: width 150ms ease; }
+    .ytm-import-progress-status { display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: var(--text-secondary, #ccc); }
+    .ytm-btn-danger { background: #b00020 !important; color: #fff !important; }
+    .ytm-btn-danger:hover { background: #cf1030 !important; }
+    .ytm-btn-sm { padding: 4px 10px !important; font-size: 11px !important; min-height: 26px !important; }
+
+    /* URL detected prompt card in search */
+    .ytm-url-detected-card {
+      margin: 12px 18px; padding: 16px; background: var(--bg-surface, #242424);
+      border: 1px solid var(--ytm-red, #ff0033); border-radius: var(--radius-md, 8px);
+      display: flex; flex-direction: column; gap: 10px;
+    }
+    .ytm-url-badge { display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 700; color: var(--ytm-red, #ff0033); text-transform: uppercase; letter-spacing: 0.5px; }
+    .ytm-url-detected-title { font-size: 16px; font-weight: 700; color: #fff; }
+    .ytm-url-detected-desc { font-size: 12px; color: var(--text-secondary, #bbb); word-break: break-all; font-family: monospace; background: rgba(0,0,0,0.2); padding: 6px 10px; border-radius: 4px; }
+    .ytm-url-detected-actions { display: flex; gap: 8px; margin-top: 4px; }
+
     /* ═══ Misc ═══ */
     .hidden { display: none !important; }
     .ytm-badge-new { background: var(--ytm-red, #ff0033); color: #fff; font-size: 9px; font-weight: 800; padding: 1px 5px; border-radius: 3px; margin-left: 5px; }
@@ -1255,6 +1509,9 @@
     _playingVideoId: null,
     _searchCache: new MemCache(5 * 60 * 1000),   // 5 min
     _browseCache:  new MemCache(10 * 60 * 1000),  // 10 min
+    _importAbortController: null,
+    _importedData: null,
+    _selectedTrackIndices: new Set(),
 
     config: {
       pipedInstances: [...PIPED_INSTANCES],
@@ -1405,11 +1662,22 @@
           <div class="ytm-settings-body" id="ytm-settings-body"></div>
         </div>
 
+        <!-- Import drawer -->
+        <div id="ytm-import-modal" role="region" aria-label="Import from URL">
+          <div class="ytm-header">
+            <div class="ytm-logo" aria-hidden="true">${ICON.import}</div>
+            <div class="ytm-title">Import Playlist from URL</div>
+            <button id="ytm-import-close" class="ytm-icon-btn" title="Close import" aria-label="Close import dialog">${ICON.close}</button>
+          </div>
+          <div class="ytm-import-body" id="ytm-import-body"></div>
+        </div>
+
         <!-- Header -->
         <div class="ytm-header">
           <button id="ytm-back-btn" class="ytm-icon-btn hidden" title="Back" aria-label="Back">${ICON.back}</button>
           <div class="ytm-logo" aria-hidden="true">${ICON.ytmusic}</div>
           <div class="ytm-title" id="ytm-panel-title">YouTube Music</div>
+          <button id="ytm-import-open" class="ytm-icon-btn" title="Import from URL" aria-label="Import playlist from URL">${ICON.import}</button>
           <button id="ytm-settings-open" class="ytm-icon-btn" title="Settings" aria-label="Settings">${ICON.settings}</button>
           <button id="ytm-close-btn" class="ytm-icon-btn" title="Close" aria-label="Close dialog">${ICON.close}</button>
         </div>
@@ -1489,6 +1757,483 @@
       };
     },
 
+    // ─── Import Dialog ──────────────────────────────────────────────────────────
+
+    _openImportModal(prefillUrl = '') {
+      this._buildImportBody();
+      const modal = document.getElementById('ytm-import-modal');
+      if (!modal) return;
+      modal.classList.add('open');
+
+      const urlInput = document.getElementById('ytm-import-url-input');
+      if (urlInput) {
+        if (prefillUrl) {
+          urlInput.value = prefillUrl;
+          this._fetchImportUrl();
+        } else {
+          setTimeout(() => urlInput.focus(), 80);
+        }
+      }
+    },
+
+    _closeImportModal() {
+      if (this._importAbortController) {
+        this._importAbortController.abort();
+        this._importAbortController = null;
+      }
+      document.getElementById('ytm-import-modal')?.classList.remove('open');
+    },
+
+    _buildImportBody() {
+      const body = document.getElementById('ytm-import-body');
+      if (!body) return;
+
+      body.innerHTML = `
+        <div class="ytm-import-input-section">
+          <p class="ytm-field-label">YouTube or YouTube Music URL</p>
+          <div class="ytm-import-bar">
+            <div class="ytm-import-input-wrap">
+              <span class="ytm-import-link-icon" aria-hidden="true">${ICON.link}</span>
+              <input type="text" id="ytm-import-url-input" class="ytm-text-input" placeholder="Paste YouTube / YTM playlist, album, or song URL…" autocomplete="off">
+            </div>
+            <button id="ytm-import-paste-btn" class="ytm-btn ytm-btn-secondary" title="Paste from clipboard">Paste</button>
+            <button id="ytm-import-fetch-btn" class="ytm-btn ytm-btn-primary">Fetch</button>
+          </div>
+          <p class="ytm-field-hint">Supports YouTube & YouTube Music playlist links, album links, and video links with playlists.</p>
+        </div>
+        <div id="ytm-import-content" class="ytm-import-content"></div>
+      `;
+
+      // Paste button
+      document.getElementById('ytm-import-paste-btn').onclick = async () => {
+        try {
+          if (navigator.clipboard?.readText) {
+            const text = await navigator.clipboard.readText();
+            if (text) {
+              const input = document.getElementById('ytm-import-url-input');
+              if (input) {
+                input.value = text.trim();
+                this._fetchImportUrl();
+              }
+            }
+          } else {
+            this._toast('Clipboard access not supported. Please paste manually (Ctrl+V).');
+          }
+        } catch (_) {
+          this._toast('Could not read clipboard. Please paste manually (Ctrl+V).');
+        }
+      };
+
+      // Fetch button
+      document.getElementById('ytm-import-fetch-btn').onclick = () => {
+        this._fetchImportUrl();
+      };
+
+      // Enter key in url input
+      document.getElementById('ytm-import-url-input')?.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          this._fetchImportUrl();
+        }
+      });
+    },
+
+    async _fetchImportUrl() {
+      const input = document.getElementById('ytm-import-url-input');
+      const val = input?.value.trim();
+      const content = document.getElementById('ytm-import-content');
+      if (!content) return;
+
+      if (!val) {
+        content.innerHTML = `<div class="ytm-empty" style="padding:24px 0;"><div class="ytm-empty-icon">⚠️</div><div class="ytm-empty-text">Please enter a YouTube link or ID.</div></div>`;
+        return;
+      }
+
+      const parsed = parseYouTubeUrl(val);
+      if (!parsed) {
+        content.innerHTML = `
+          <div class="ytm-empty" style="padding:24px 0;">
+            <div class="ytm-empty-icon">⚠️</div>
+            <div class="ytm-empty-text">Unrecognized link format.</div>
+            <p class="ytm-field-hint" style="text-align:center; margin-top:8px;">
+              Please provide a valid YouTube Music or YouTube URL (e.g. <code>https://music.youtube.com/playlist?list=...</code>).
+            </p>
+          </div>
+        `;
+        return;
+      }
+
+      content.innerHTML = `
+        <div class="ytm-empty" style="padding:32px 0;">
+          <div class="ytm-empty-icon ytm-spin">${ICON.sync}</div>
+          <div class="ytm-empty-text" id="ytm-import-fetch-status">Connecting to YouTube Music…</div>
+        </div>
+      `;
+
+      const statusEl = document.getElementById('ytm-import-fetch-status');
+
+      try {
+        if (parsed.type === 'playlist') {
+          if (statusEl) statusEl.textContent = 'Loading playlist and fetching tracks…';
+          const playlist = await API.getPlaylistAllTracks(parsed.browseId, (u, o) => this._apiFetch(u, o), (prog) => {
+            if (statusEl) statusEl.textContent = `Loaded ${prog.loaded} tracks…`;
+          });
+          this._importedData = playlist;
+          this._renderImportResult(playlist);
+        } else if (parsed.type === 'album') {
+          if (statusEl) statusEl.textContent = 'Loading album…';
+          const album = await API.getAlbum(parsed.browseId, (u, o) => this._apiFetch(u, o));
+          this._importedData = album;
+          this._renderImportResult(album);
+        } else if (parsed.type === 'track') {
+          if (statusEl) statusEl.textContent = 'Fetching song details…';
+          const watchData = await API.getWatchPlaylist(parsed.videoId, null, (u, o) => this._apiFetch(u, o));
+          if (!watchData || !watchData.length) {
+            throw new Error('Track not found on YouTube Music');
+          }
+          const singleTrack = watchData[0];
+          this._importedData = { type: 'track', track: singleTrack, radioQueue: watchData };
+          this._renderImportResult(this._importedData);
+        } else if (parsed.type === 'artist') {
+          this._closeImportModal();
+          this._pushNav('Artist', () => this._loadArtist(parsed.browseId), null);
+        }
+      } catch (err) {
+        console.error(`${PLUGIN_LABEL} fetch import error:`, err);
+        content.innerHTML = `
+          <div class="ytm-empty" style="padding:24px 0;">
+            <div class="ytm-empty-icon">⚠️</div>
+            <div class="ytm-empty-text">Failed to fetch content: ${esc(err.message)}</div>
+          </div>
+        `;
+      }
+    },
+
+    _renderImportResult(data) {
+      const content = document.getElementById('ytm-import-content');
+      if (!content || !data) return;
+
+      // Handle single track
+      if (data.type === 'track') {
+        const t = data.track;
+        const durStr = t.duration ? fmtDuration(t.duration) : '';
+        const thumb = t.thumb || ytThumb(t.videoId);
+        content.innerHTML = `
+          <div class="ytm-import-card">
+            <div class="ytm-import-hero">
+              <img class="ytm-import-thumb" src="${esc(thumb)}" alt="" onerror="this.remove()">
+              <div class="ytm-import-info">
+                <div class="ytm-import-title-static">${esc(t.title)}</div>
+                <div class="ytm-import-sub">
+                  <span>${esc(t.artist || 'Unknown Artist')}</span>
+                  ${t.album ? `<span class="ytm-dot">·</span><span>${esc(t.album)}</span>` : ''}
+                  ${durStr ? `<span class="ytm-dot">·</span><span>${durStr}</span>` : ''}
+                </div>
+              </div>
+            </div>
+            <div class="ytm-import-actions-bar">
+              <div class="ytm-import-action-buttons">
+                <button id="ytm-import-play-track" class="ytm-btn ytm-btn-primary">${ICON.play} Play Song</button>
+                <button id="ytm-import-radio-track" class="ytm-btn ytm-btn-secondary">${ICON.queue} Start Radio</button>
+                <button id="ytm-import-save-track" class="ytm-btn ytm-btn-secondary">${ICON.heart} Add to Library</button>
+              </div>
+            </div>
+          </div>
+        `;
+
+        document.getElementById('ytm-import-play-track').onclick = () => {
+          this._playTrack(t, [t]);
+          this._closeImportModal();
+        };
+        document.getElementById('ytm-import-radio-track').onclick = () => {
+          this._playTrack(t, data.radioQueue || [t]);
+          this._closeImportModal();
+        };
+        document.getElementById('ytm-import-save-track').onclick = async () => {
+          await this._saveTrack(t);
+          this._closeImportModal();
+        };
+        return;
+      }
+
+      // Handle playlist or album
+      const tracks = data.tracks || [];
+      if (!tracks.length) {
+        content.innerHTML = `
+          <div class="ytm-empty" style="padding:24px 0;">
+            <div class="ytm-empty-icon">🎵</div>
+            <div class="ytm-empty-text">No playable tracks found in this ${data.type || 'playlist'}.</div>
+          </div>
+        `;
+        return;
+      }
+
+      this._selectedTrackIndices = new Set(tracks.map((_, i) => i));
+
+      const totalSec = tracks.reduce((acc, t) => acc + (t.duration || 0), 0);
+      const totalDurStr = totalSec > 0 ? fmtDuration(totalSec) : '';
+      const thumb = data.thumb || (tracks[0]?.videoId ? ytThumb(tracks[0].videoId) : '');
+      const owner = data.owner || data.artist || 'YouTube Music';
+
+      content.innerHTML = `
+        <div class="ytm-import-card">
+          <div class="ytm-import-hero">
+            ${thumb ? `<img class="ytm-import-thumb" src="${esc(thumb)}" alt="" onerror="this.remove()">` : ''}
+            <div class="ytm-import-info">
+              <label class="ytm-field-label" for="ytm-import-title-input">Playlist Title (editable)</label>
+              <input type="text" id="ytm-import-title-input" class="ytm-text-input ytm-import-title-input" value="${esc(data.title || 'Imported Playlist')}">
+              <div class="ytm-import-sub">
+                <span class="ytm-import-owner">${esc(owner)}</span>
+                <span class="ytm-dot">·</span>
+                <span class="ytm-import-count">${tracks.length} tracks</span>
+                ${totalDurStr ? `<span class="ytm-dot">·</span><span class="ytm-import-dur">${totalDurStr}</span>` : ''}
+                ${data.hasMore ? `<span class="ytm-badge-new">Capped at 500</span>` : ''}
+              </div>
+            </div>
+          </div>
+
+          <div class="ytm-import-actions-bar">
+            <label class="ytm-checkbox-label" for="ytm-import-select-all">
+              <input type="checkbox" id="ytm-import-select-all" checked>
+              <span>Select All (<span id="ytm-import-selected-count">${tracks.length}</span>)</span>
+            </label>
+            <div class="ytm-import-action-buttons">
+              <button id="ytm-import-play-btn" class="ytm-btn ytm-btn-secondary">${ICON.play} Play Now</button>
+              <button id="ytm-import-save-btn" class="ytm-btn ytm-btn-primary">${ICON.heart} Import to Library</button>
+            </div>
+          </div>
+
+          <!-- Progress bar -->
+          <div id="ytm-import-progress-wrap" class="ytm-import-progress-wrap hidden">
+            <div class="ytm-progress-bar-bg">
+              <div id="ytm-import-progress-bar" class="ytm-progress-bar-fill" style="width: 0%;"></div>
+            </div>
+            <div class="ytm-import-progress-status">
+              <span id="ytm-import-progress-text">Importing…</span>
+              <button id="ytm-import-cancel-btn" class="ytm-btn ytm-btn-danger ytm-btn-sm">Cancel</button>
+            </div>
+          </div>
+
+          <!-- Track checklist -->
+          <div class="ytm-import-track-list" id="ytm-import-track-list">
+            ${tracks.map((t, idx) => {
+              const rowThumb = t.thumb || (t.videoId ? ytThumb(t.videoId, 'hqdefault') : '');
+              const dur = t.duration ? fmtDuration(t.duration) : '';
+              return `
+                <div class="ytm-import-track-row" data-idx="${idx}">
+                  <input type="checkbox" class="ytm-import-track-chk" data-idx="${idx}" checked>
+                  <span class="ytm-import-track-num">${idx + 1}</span>
+                  <img class="ytm-import-track-thumb" src="${esc(rowThumb)}" alt="" loading="lazy">
+                  <div class="ytm-import-track-meta">
+                    <div class="ytm-import-track-title">${esc(t.title)}</div>
+                    <div class="ytm-import-track-sub">${esc(t.artist || 'Unknown Artist')}</div>
+                  </div>
+                  ${dur ? `<div class="ytm-import-track-dur">${esc(dur)}</div>` : ''}
+                </div>
+              `;
+            }).join('')}
+          </div>
+        </div>
+      `;
+
+      // Select all toggle
+      const selectAllEl = document.getElementById('ytm-import-select-all');
+      selectAllEl.onchange = (e) => {
+        const checked = e.target.checked;
+        const chks = content.querySelectorAll('.ytm-import-track-chk');
+        chks.forEach(c => {
+          c.checked = checked;
+          const idx = parseInt(c.dataset.idx, 10);
+          if (checked) this._selectedTrackIndices.add(idx);
+          else this._selectedTrackIndices.delete(idx);
+        });
+        this._updateSelectedCount(tracks.length);
+      };
+
+      // Individual checkboxes
+      content.querySelectorAll('.ytm-import-track-chk').forEach(c => {
+        c.onchange = (e) => {
+          const idx = parseInt(c.dataset.idx, 10);
+          if (c.checked) this._selectedTrackIndices.add(idx);
+          else this._selectedTrackIndices.delete(idx);
+          if (selectAllEl) selectAllEl.checked = this._selectedTrackIndices.size === tracks.length;
+          this._updateSelectedCount(tracks.length);
+        };
+      });
+
+      // Play Now button
+      document.getElementById('ytm-import-play-btn').onclick = () => {
+        const selected = tracks.filter((_, i) => this._selectedTrackIndices.has(i));
+        if (!selected.length) {
+          this._toast('Please select at least one track to play');
+          return;
+        }
+        this._playTrack(selected[0], selected);
+        this._closeImportModal();
+      };
+
+      // Import to Library button
+      document.getElementById('ytm-import-save-btn').onclick = () => {
+        this._startImport(data);
+      };
+    },
+
+    _updateSelectedCount(total) {
+      const countEl = document.getElementById('ytm-import-selected-count');
+      if (countEl) countEl.textContent = this._selectedTrackIndices.size;
+      const playBtn = document.getElementById('ytm-import-play-btn');
+      const saveBtn = document.getElementById('ytm-import-save-btn');
+      const disabled = this._selectedTrackIndices.size === 0;
+      if (playBtn) playBtn.disabled = disabled;
+      if (saveBtn) saveBtn.disabled = disabled;
+    },
+
+    async _startImport(data) {
+      const tracks = data.tracks || [];
+      const selectedTracks = tracks.filter((_, i) => this._selectedTrackIndices.has(i));
+      if (!selectedTracks.length) {
+        this._toast('No tracks selected to import');
+        return;
+      }
+
+      const titleInput = document.getElementById('ytm-import-title-input');
+      const playlistTitle = (titleInput?.value || data.title || 'Imported Playlist').trim();
+      const thumb = data.thumb || (selectedTracks[0]?.videoId ? ytThumb(selectedTracks[0].videoId) : null);
+
+      const progressWrap = document.getElementById('ytm-import-progress-wrap');
+      const progressBar  = document.getElementById('ytm-import-progress-bar');
+      const progressText = document.getElementById('ytm-import-progress-text');
+      const cancelBtn    = document.getElementById('ytm-import-cancel-btn');
+      const actionsBar   = document.querySelector('.ytm-import-actions-bar');
+
+      if (progressWrap) progressWrap.classList.remove('hidden');
+      if (actionsBar) actionsBar.classList.add('hidden');
+
+      this._importAbortController = new AbortController();
+      const signal = this._importAbortController.signal;
+
+      cancelBtn.onclick = () => {
+        if (this._importAbortController) {
+          this._importAbortController.abort();
+        }
+      };
+
+      try {
+        const res = await this._importTracksToLibrary(
+          playlistTitle,
+          thumb,
+          selectedTracks,
+          ({ current, total, track }) => {
+            const pct = Math.round((current / total) * 100);
+            if (progressBar) progressBar.style.width = `${pct}%`;
+            if (progressText) progressText.textContent = `Importing ${current}/${total}: ${track.title}`;
+          },
+          signal
+        );
+
+        this._toast(`Imported ${res.imported} tracks into "${playlistTitle}"!`);
+        if (progressText) {
+          progressText.innerHTML = `${ICON.check} Imported ${res.imported} tracks into Library!`;
+        }
+        if (cancelBtn) cancelBtn.classList.add('hidden');
+        if (progressBar) progressBar.style.width = '100%';
+
+        setTimeout(() => {
+          this._closeImportModal();
+        }, 1500);
+      } catch (err) {
+        if (err.name === 'AbortError') {
+          this._toast('Import stopped');
+          if (progressText) progressText.textContent = 'Import cancelled by user';
+        } else {
+          console.error(`${PLUGIN_LABEL} import error:`, err);
+          this._toast(`Import error: ${err.message}`);
+          if (progressText) progressText.textContent = `Error: ${err.message}`;
+        }
+        if (cancelBtn) cancelBtn.textContent = 'Close';
+        cancelBtn.onclick = () => this._closeImportModal();
+      } finally {
+        this._importAbortController = null;
+      }
+    },
+
+    async _importTracksToLibrary(title, thumb, tracks, onProgress, signal) {
+      if (!tracks || !tracks.length) throw new Error('No tracks selected to import');
+
+      let playlistId = null;
+      try {
+        playlistId = await this.api.library.createPlaylist(title, thumb || null);
+      } catch (err) {
+        console.warn(`${PLUGIN_LABEL} createPlaylist error:`, err);
+      }
+
+      let imported = 0;
+      for (let i = 0; i < tracks.length; i++) {
+        if (signal?.aborted) {
+          throw new DOMException('Import cancelled by user', 'AbortError');
+        }
+        const t = tracks[i];
+        if (!t.videoId) continue;
+
+        try {
+          const dur = t.duration || videoDurationCache.get(t.videoId) || null;
+          const trackCover = t.thumb || (t.videoId ? ytThumb(t.videoId, 'hqdefault') : null) || thumb;
+          const trackId = await this.api.library.addExternalTrack({
+            title:       t.title,
+            artist:      t.artist || 'Unknown Artist',
+            album:       t.album || title,
+            duration:    dur || null,
+            cover_url:   trackCover,
+            source_type: SOURCE_TYPE,
+            external_id: t.videoId,
+            liked:       false,
+          });
+          this.libraryIds.add(t.videoId);
+
+          if (playlistId && typeof trackId === 'number' && trackId > 0) {
+            await this.api.library.addTrackToPlaylist(playlistId, trackId);
+          }
+          imported++;
+        } catch (trackErr) {
+          console.warn(`${PLUGIN_LABEL} addExternalTrack failed for ${t.videoId}:`, trackErr);
+        }
+
+        onProgress?.({ current: i + 1, total: tracks.length, track: t, imported });
+      }
+
+      if (typeof this.api.library.refresh === 'function') {
+        try { await this.api.library.refresh(); } catch (_) {}
+      }
+
+      return { playlistId, imported, total: tracks.length };
+    },
+
+    _renderUrlDetectedCard(urlInfo, rawUrl) {
+      const typeLabel = urlInfo.type === 'playlist' ? 'YouTube / YTM Playlist' : urlInfo.type === 'album' ? 'YouTube Music Album' : 'YouTube Song';
+      const btnIcon = urlInfo.type === 'track' ? ICON.play : ICON.import;
+      const btnText = urlInfo.type === 'track' ? 'Play / Inspect Song' : 'Preview & Import Playlist';
+
+      const wrap = document.createElement('div');
+      wrap.innerHTML = `
+        <div class="ytm-url-detected-card">
+          <div class="ytm-url-badge">${ICON.link} YouTube Link Detected</div>
+          <div class="ytm-url-detected-title">${typeLabel}</div>
+          <div class="ytm-url-detected-desc">${esc(rawUrl)}</div>
+          <div class="ytm-url-detected-actions">
+            <button class="ytm-btn ytm-btn-primary" id="ytm-url-open-btn">
+              ${btnIcon} ${btnText}
+            </button>
+          </div>
+        </div>
+      `;
+
+      wrap.querySelector('#ytm-url-open-btn').onclick = () => {
+        this._openImportModal(rawUrl);
+      };
+
+      this._setContent(wrap);
+    },
+
     _renderInstanceList(containerId, arr) {
       const el = document.getElementById(containerId);
       if (!el) return;
@@ -1522,6 +2267,14 @@
         document.getElementById('ytm-settings')?.classList.remove('open');
       };
 
+      // Import modal
+      document.getElementById('ytm-import-open').onclick = () => {
+        this._openImportModal();
+      };
+      document.getElementById('ytm-import-close').onclick = () => {
+        this._closeImportModal();
+      };
+
       // Tabs
       document.getElementById('ytm-tabs').onclick = (e) => {
         const btn = e.target.closest('[data-tab]');
@@ -1551,12 +2304,42 @@
         this._currentQuery = q;
         clearTimeout(this._searchTimer);
         if (!q) { this._setContent(this._emptyEl('🎵', 'Start typing to search…')); return; }
+
+        const urlInfo = parseYouTubeUrl(q);
+        if (urlInfo) {
+          this._renderUrlDetectedCard(urlInfo, q);
+          return;
+        }
+
         this._searchTimer = setTimeout(() => this._performSearch(q), 380);
       });
 
-      // ESC to close
+      input?.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          const q = input.value.trim();
+          const urlInfo = parseYouTubeUrl(q);
+          if (urlInfo) {
+            e.preventDefault();
+            this._openImportModal(q);
+          }
+        }
+      });
+
+      // ESC to close (close modals first)
       document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape' && this.isOpen) this.close();
+        if (e.key === 'Escape' && this.isOpen) {
+          const importModal = document.getElementById('ytm-import-modal');
+          if (importModal?.classList.contains('open')) {
+            this._closeImportModal();
+            return;
+          }
+          const settings = document.getElementById('ytm-settings');
+          if (settings?.classList.contains('open')) {
+            settings.classList.remove('open');
+            return;
+          }
+          this.close();
+        }
       });
     },
 
@@ -2263,44 +3046,50 @@
       const list = this._renderTrackSection(section);
       if (list) wrap.appendChild(list);
 
+      if (playlist.continuationToken) {
+        const loadMoreRow = document.createElement('div');
+        loadMoreRow.style.cssText = 'padding: 16px; text-align: center;';
+        const loadMoreBtn = document.createElement('button');
+        loadMoreBtn.className = 'ytm-btn ytm-btn-secondary';
+        loadMoreBtn.innerHTML = `${ICON.sync} Load More Tracks`;
+        loadMoreBtn.onclick = async () => {
+          loadMoreBtn.disabled = true;
+          loadMoreBtn.innerHTML = `${ICON.sync} Loading…`;
+          try {
+            const full = await API.getPlaylistAllTracks(playlist.browseId, (u, o) => this._apiFetch(u, o));
+            this._browseCache.set(`playlist:${playlist.browseId}`, full);
+            this._renderPlaylistPage(full);
+          } catch (e) {
+            this._toast(`Failed to load more: ${e.message}`);
+            loadMoreBtn.disabled = false;
+            loadMoreBtn.innerHTML = `${ICON.sync} Load More Tracks`;
+          }
+        };
+        loadMoreRow.appendChild(loadMoreBtn);
+        wrap.appendChild(loadMoreRow);
+      }
+
       this._setContent(wrap);
     },
 
     async _toggleLikePlaylist(playlist, btnEl, wrapEl) {
       if (!playlist.tracks?.length) return;
       btnEl.disabled = true;
-      btnEl.innerHTML = `${ICON.sync} Saving...`;
+      btnEl.innerHTML = `${ICON.sync} Saving…`;
 
       try {
-        const playlistId = await this.api.library.createPlaylist(playlist.title, playlist.thumb || null);
-
-        for (const t of playlist.tracks) {
-          if (!t.videoId) continue;
-          const dur = t.duration || videoDurationCache.get(t.videoId) || null;
-          const trackId = await this.api.library.addExternalTrack({
-            title:       t.title,
-            artist:      t.artist || playlist.owner || 'Unknown Artist',
-            album:       t.album || playlist.title,
-            duration:    dur || null,
-            cover_url:   playlist.thumb || t.thumb || ytThumb(t.videoId),
-            source_type: SOURCE_TYPE,
-            external_id: t.videoId,
-            liked:       false,
-          });
-          this.libraryIds.add(t.videoId);
-
-          if (playlistId && typeof trackId === 'number' && trackId > 0) {
-            await this.api.library.addTrackToPlaylist(playlistId, trackId);
+        const res = await this._importTracksToLibrary(
+          playlist.title,
+          playlist.thumb || null,
+          playlist.tracks,
+          ({ current, total }) => {
+            btnEl.innerHTML = `${ICON.sync} Saving ${current}/${total}…`;
           }
-        }
-
-        if (typeof this.api.library.refresh === 'function') {
-          await this.api.library.refresh();
-        }
+        );
 
         btnEl.classList.add('saved');
         btnEl.innerHTML = `${ICON.heart} In Library`;
-        this._toast(`Playlist "${playlist.title}" saved to Library`);
+        this._toast(`Playlist "${playlist.title}" saved to Library (${res.imported} tracks)`);
 
         if (wrapEl) {
           wrapEl.querySelectorAll('.ytm-track').forEach(row => {

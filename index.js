@@ -97,6 +97,7 @@
     import:  `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>`,
     link:    `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>`,
     check:   `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`,
+    wand:    `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 4-2 4 4 2-4-2-2-4Z"/><path d="m3 21 9-9"/><path d="M12.2 6.8 4 15l2 2 8.2-8.2Z"/></svg>`,
   };
 
   // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -112,16 +113,164 @@
     return `${m}:${String(s).padStart(2,'0')}`;
   }
 
-  function ytThumb(videoId, q = 'mqdefault') {
-    return `https://i.ytimg.com/vi/${videoId}/${q || 'mqdefault'}.jpg`;
+  function upgradeThumbUrl(url, targetSize = 800) {
+    if (!url || typeof url !== 'string') return url;
+
+    // 1. Google Fife / Google User Content / GGPHT CDN (Used for official YTM covers & artist avatars)
+    if (/googleusercontent\.com|ggpht\.com/i.test(url)) {
+      if (/=([sw])\d+/i.test(url)) {
+        return url.replace(/=([sw])\d+([^/]*)$/i, (match, prefix, rest) => {
+          if (prefix.toLowerCase() === 'w') {
+            const hasP = rest.includes('-p');
+            const flags = (hasP ? '-p' : '') + '-l90-rj';
+            return `=w${targetSize}-h${targetSize}${flags}`;
+          }
+          const hasC = rest.includes('-c');
+          return `=s${targetSize}${hasC ? '-c-k-c0x00ffffff-no-rj' : ''}`;
+        });
+      }
+      if (/\/(s|w)\d+([^/]*)$/i.test(url)) {
+        return url.replace(/\/(s|w)\d+([^/]*)$/i, `/$1${targetSize}$2`);
+      }
+      return url;
+    }
+
+    // 2. YouTube Image CDN (i.ytimg.com)
+    if (/ytimg\.com/i.test(url)) {
+      const clean = url.split('?')[0];
+      return clean.replace(/\/(?:mqdefault|default|sddefault)\.jpg$/i, '/hqdefault.jpg');
+    }
+
+    return url;
+  }
+
+  function ytThumb(videoId, q = 'hqdefault') {
+    return `https://i.ytimg.com/vi/${videoId}/${q || 'hqdefault'}.jpg`;
   }
 
   function bestThumb(thumbnails) {
     if (!thumbnails || !thumbnails.length) return null;
-    // prefer ~400px wide; fallback to last (usually largest)
-    const sorted = [...thumbnails].sort((a, b) => (b.width || 0) - (a.width || 0));
-    const med = sorted.find(t => t.width && t.width <= 500);
-    return (med || sorted[0])?.url || null;
+    const sorted = [...thumbnails].sort((a, b) => {
+      return ((b.width || 0) * (b.height || 0)) - ((a.width || 0) * (a.height || 0));
+    });
+    const largest = sorted[0]?.url || thumbnails[thumbnails.length - 1]?.url;
+    return upgradeThumbUrl(largest);
+  }
+
+  function cleanTitleAndArtist(rawTitle, rawArtist, pageType, isVideoOrChannel = false) {
+    let title = (rawTitle || '').trim();
+    let artist = (rawArtist || '').trim();
+
+    if (artist.endsWith(' - Topic')) {
+      artist = artist.replace(/ - Topic$/, '').trim();
+    }
+
+    const isOfficialArtist = pageType === 'MUSIC_PAGE_TYPE_ARTIST';
+
+    const isChannelOrLabel = isVideoOrChannel ||
+      pageType === 'MUSIC_PAGE_TYPE_USER_CHANNEL' ||
+      !artist ||
+      /^(vevo|official|channel|music|records|label|curator|lyrics|nation|media|tv|sounds?|audio|entertainment|club|city|hub|studios?)$/i.test(artist) ||
+      /(?:vevo|records|entertainment|official\s*channel|music\s*channel)$/i.test(artist) ||
+      /^(trap\s*nation|7clouds|proximity|lyrical\s*lemonade|selected\.|spinnin'\s*records|monstercat|live\s*aid|mister\s*suicidesheep|chilledcow|lofi\s*girl)$/i.test(artist);
+
+    const splitMatch = title.match(/^(.+?)\s+[-–—|:_]\s+(.+)$/);
+    if (splitMatch && (!isOfficialArtist || isChannelOrLabel)) {
+      const left = splitMatch[1].trim();
+      const right = splitMatch[2].trim();
+      if (left.length > 0 && right.length > 0) {
+        artist = left;
+        title = right;
+      }
+    }
+
+    const junkPatterns = [
+      /\s*\[\s*(?:official\s*(?:music\s*)?video|official\s*audio|lyric\s*video|lyrics|audio|hd|4k|mv|music\s*video|visualizer|clip\s*officiel|video\s*oficial)\s*\]/gi,
+      /\s*\(\s*(?:official\s*(?:music\s*)?video|official\s*audio|lyric\s*video|lyrics|audio|hd|4k|mv|music\s*video|visualizer|clip\s*officiel|video\s*oficial)\s*\)/gi,
+      /\s*\[\s*(?:full\s*hd|1080p|720p|4k\s*uhd|remastered|remaster)\s*\]/gi,
+      /\s*\(\s*(?:full\s*hd|1080p|720p|4k\s*uhd|remastered|remaster)\s*\)/gi,
+      /\s*\[\s*(?:live(?:\s+(?:at|in|aid|\d{4}))?[^\]]*)\s*\]/gi,
+      /\s*\(\s*(?:live(?:\s+(?:at|in|aid|\d{4}))?[^\)]*)\s*\)/gi,
+      /\s*\[\s*(?:directed\s+by\s+[^\]]+)\s*\]/gi,
+      /\s*\(\s*(?:directed\s+by\s+[^\)]+)\s*\)/gi,
+      /^\s*\[\s*(?:mv|official\s*video|hd)\s*\]\s*/gi,
+      /^\s*【\s*(?:mv|hd)\s*】\s*/gi,
+      /\s+(?:\d{4}\s+)?live\s+video(?:\s+full\s+hd|\s+hd)?$/i,
+    ];
+
+    for (const pat of junkPatterns) {
+      title = title.replace(pat, '');
+    }
+
+    title = title.replace(/^[\s\-–—|:]+|[\s\-–—|:]+$/g, '').trim();
+    title = title.replace(/^["'“”](.*)["'“”]$/, '$1').trim();
+
+    if (/VEVO$/i.test(artist) && artist.length > 4) {
+      artist = artist.replace(/VEVO$/i, '').trim();
+    }
+    if (/Official$/i.test(artist) && artist.length > 8) {
+      artist = artist.replace(/Official$/i, '').trim();
+    }
+
+    return {
+      title: title || rawTitle,
+      artist: artist || rawArtist || 'Unknown Artist'
+    };
+  }
+
+  const canonicalMetaCache = new Map();
+
+  async function fetchCanonicalMetadata(title, artist, apiFetch) {
+    const query = `${artist} ${title}`.replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim();
+    const cacheKey = query.toLowerCase();
+    if (canonicalMetaCache.has(cacheKey)) return canonicalMetaCache.get(cacheKey);
+
+    // 1. Primary: iTunes / Apple Music Search API
+    try {
+      const url = `https://itunes.apple.com/search?term=${encodeURIComponent(query)}&entity=song&limit=1`;
+      const res = await apiFetch(url, { headers: { 'User-Agent': 'Audion/1.0' } });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.results && json.results.length > 0) {
+          const r = json.results[0];
+          const hiResCover = r.artworkUrl100
+            ? r.artworkUrl100.replace(/100x100bb\.jpg$/, '1000x1000bb.jpg')
+            : null;
+          const result = {
+            title:  r.trackName || title,
+            artist: r.artistName || artist,
+            album:  r.collectionName || '',
+            thumb:  hiResCover,
+            source: 'itunes'
+          };
+          canonicalMetaCache.set(cacheKey, result);
+          return result;
+        }
+      }
+    } catch (_) {}
+
+    // 2. Fallback: Deezer API
+    try {
+      const url = `https://api.deezer.com/search?q=${encodeURIComponent(query)}&limit=1`;
+      const res = await apiFetch(url, { headers: { 'User-Agent': 'Audion/1.0' } });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.data && json.data.length > 0) {
+          const r = json.data[0];
+          const result = {
+            title:  r.title || title,
+            artist: r.artist?.name || artist,
+            album:  r.album?.title || '',
+            thumb:  r.album?.cover_xl || r.album?.cover_big,
+            source: 'deezer'
+          };
+          canonicalMetaCache.set(cacheKey, result);
+          return result;
+        }
+      }
+    } catch (_) {}
+
+    return null;
   }
 
   function getText(runs) {
@@ -435,6 +584,18 @@
       }
 
       // For songs embedded in a carousel (they have a watchEndpoint in a menu or the item itself)
+      if (videoId) {
+        let cardArtist = '';
+        for (const r of subRuns) {
+          const t = r.text?.trim() || '';
+          if (!cardArtist && !isStatOrType(t)) {
+            cardArtist = t;
+            break;
+          }
+        }
+        const cleaned = cleanTitleAndArtist(title, cardArtist, pageType, true);
+        return { title: cleaned.title, artist: cleaned.artist, thumb, browseId, videoId, playlistId, subtitle, pageType, duration };
+      }
       return { title, thumb, browseId, videoId, playlistId, subtitle, pageType, duration };
     }
 
@@ -447,7 +608,7 @@
       const col2  = cols[2]?.musicResponsiveListItemFlexColumnRenderer?.text;
       const col3  = cols[3]?.musicResponsiveListItemFlexColumnRenderer?.text;
 
-      const title = getText(col0);
+      let title = getText(col0);
       if (!title) return null;
 
       // videoId — several possible locations, try all
@@ -511,15 +672,17 @@
 
       // Try to find artist vs album from navigation endpoints
       let artist = '', album = '', artistBrowseId = null, albumBrowseId = null;
+      let isVerifiedArtist = false;
       const allSubRuns = [...col1Runs, ...col2Runs, ...col3Runs];
       for (const run of allSubRuns) {
         const bNav = run.navigationEndpoint?.browseEndpoint;
         const bId = bNav?.browseId;
         const runPT = bNav?.browseEndpointContextSupportedConfigs?.browseEndpointContextMusicConfig?.pageType;
-        if (runPT?.includes('ARTIST') || (bId && bId.startsWith('UC'))) {
+        if (runPT?.includes('ARTIST')) {
           if (!artist && !isStatOrType(run.text)) {
             artist = run.text.trim();
             artistBrowseId = bId;
+            isVerifiedArtist = true;
           }
         } else if (runPT?.includes('ALBUM') || runPT?.includes('SINGLE') || (bId && bId.startsWith('MPRE'))) {
           if (!album && !isStatOrType(run.text)) {
@@ -557,6 +720,11 @@
           break;
         }
       }
+
+      // Clean title and artist
+      const cleaned = cleanTitleAndArtist(title, artist, isVerifiedArtist ? 'MUSIC_PAGE_TYPE_ARTIST' : (pageType || 'MUSIC_PAGE_TYPE_USER_CHANNEL'), !!videoId);
+      title = cleaned.title;
+      artist = cleaned.artist;
 
       // Explicit badge
       const isExplicit = !!(listItem.badges?.some(b =>
@@ -726,11 +894,18 @@
           videoDurationCache.set(videoId, cardDuration);
         }
 
+        let heroTitle = title;
+        if (videoId) {
+          const cleaned = cleanTitleAndArtist(title, cardArtist, pageType, true);
+          heroTitle = cleaned.title;
+          cardArtist = cleaned.artist;
+        }
+
         const topTracks = (card.contents || []).map(parseMusicItem).filter(Boolean);
         sections.push({
           _type: 'card-hero',
           title: 'Top Result',
-          item: { title, subtitle, thumb, browseId, pageType, videoId, artist: cardArtist, duration: cardDuration },
+          item: { title: heroTitle, subtitle, thumb, browseId, pageType, videoId, artist: cardArtist, duration: cardDuration },
           items: topTracks
         });
       } else if (c.itemSectionRenderer) {
@@ -853,12 +1028,22 @@
     // Use generic collector for tracks
     const sections = collectSections(data);
     const trackSection = sections.find(s => s.items.some(i => i.videoId));
-    const tracks = (trackSection?.items || []).map(p => ({
-      ...p,
-      artist: (p.artist && !isStatOrType(p.artist)) ? p.artist : (owner || 'Unknown Artist'),
-      album: p.album || title,
-      thumb: p.thumb || (p.videoId ? ytThumb(p.videoId, 'hqdefault') : null) || thumb,
-    }));
+    const tracks = (trackSection?.items || []).map(p => {
+      let trackArtist = (p.artist && !isStatOrType(p.artist)) ? p.artist : '';
+      let trackTitle = p.title || '';
+      if (!trackArtist || trackArtist === owner) {
+        const cleaned = cleanTitleAndArtist(trackTitle, trackArtist || owner, 'MUSIC_PAGE_TYPE_USER_CHANNEL', true);
+        trackTitle = cleaned.title;
+        trackArtist = cleaned.artist;
+      }
+      return {
+        ...p,
+        title: trackTitle,
+        artist: trackArtist || owner || 'Unknown Artist',
+        album: p.album || title,
+        thumb: p.thumb || (p.videoId ? ytThumb(p.videoId, 'hqdefault') : null) || thumb,
+      };
+    });
     const continuationToken = findShelfContinuationToken(data);
     return { type: 'playlist', title, owner, thumb, browseId, tracks, continuationToken };
   }
@@ -872,8 +1057,11 @@
       const p = item.playlistPanelVideoRenderer;
       if (!p) return null;
       const videoId = p.videoId;
-      const title   = getText(p.title);
-      const artist  = getText(p.shortBylineText);
+      const rawTitle = getText(p.title);
+      const rawArtist = getText(p.shortBylineText);
+      const cleaned = cleanTitleAndArtist(rawTitle, rawArtist, 'MUSIC_PAGE_TYPE_USER_CHANNEL', true);
+      const title   = cleaned.title;
+      const artist  = cleaned.artist;
       const album   = getText(p.longBylineText?.runs?.find(r => r?.navigationEndpoint?.browseEndpoint?.pageType === 'MUSIC_PAGE_TYPE_ALBUM'));
       const duration = parseDurationText(getText(p.lengthText));
       const thumb   = bestThumb(p.thumbnail?.thumbnails) || ytThumb(videoId);
@@ -1464,6 +1652,11 @@
     .ytm-import-track-title { font-size: 13px; font-weight: 500; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .ytm-import-track-sub { font-size: 11px; color: var(--text-secondary, #aaa); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .ytm-import-track-dur { font-size: 12px; color: var(--text-subdued, #888); font-variant-numeric: tabular-nums; }
+    .ytm-meta-fixed-pill {
+      display: inline-block; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;
+      padding: 1px 5px; border-radius: 4px; background: rgba(30, 215, 96, 0.2);
+      color: #1ed760; border: 1px solid rgba(30, 215, 96, 0.4); vertical-align: middle; margin-left: 4px;
+    }
     .ytm-import-progress-wrap {
       display: flex; flex-direction: column; gap: 8px; padding: 12px; background: rgba(0,0,0,0.25);
       border-radius: var(--radius-md, 6px); border: 1px solid var(--border-color, #333);
@@ -1998,6 +2191,9 @@
               <span>Select All (<span id="ytm-import-selected-count">${tracks.length}</span>)</span>
             </label>
             <div class="ytm-import-action-buttons">
+              <button id="ytm-import-fix-btn" class="ytm-btn ytm-btn-secondary" title="Fix artist, song title & fetch high-res cover art">
+                ${ICON.wand} <span id="ytm-import-fix-label">Fix All Metadata</span>
+              </button>
               <button id="ytm-import-play-btn" class="ytm-btn ytm-btn-secondary">${ICON.play} Play Now</button>
               <button id="ytm-import-save-btn" class="ytm-btn ytm-btn-primary">${ICON.heart} Import to Library</button>
             </div>
@@ -2061,6 +2257,14 @@
         };
       });
 
+      // Fix Metadata button
+      const fixBtn = document.getElementById('ytm-import-fix-btn');
+      if (fixBtn) {
+        fixBtn.onclick = () => {
+          this._fixImportMetadata(data);
+        };
+      }
+
       // Play Now button
       document.getElementById('ytm-import-play-btn').onclick = () => {
         const selected = tracks.filter((_, i) => this._selectedTrackIndices.has(i));
@@ -2076,6 +2280,8 @@
       document.getElementById('ytm-import-save-btn').onclick = () => {
         this._startImport(data);
       };
+
+      this._updateSelectedCount(tracks.length);
     },
 
     _updateSelectedCount(total) {
@@ -2083,9 +2289,137 @@
       if (countEl) countEl.textContent = this._selectedTrackIndices.size;
       const playBtn = document.getElementById('ytm-import-play-btn');
       const saveBtn = document.getElementById('ytm-import-save-btn');
-      const disabled = this._selectedTrackIndices.size === 0;
+      const fixBtn = document.getElementById('ytm-import-fix-btn');
+      const fixLabel = document.getElementById('ytm-import-fix-label');
+      const selSize = this._selectedTrackIndices.size;
+      const disabled = selSize === 0;
+
       if (playBtn) playBtn.disabled = disabled;
       if (saveBtn) saveBtn.disabled = disabled;
+      if (fixBtn) fixBtn.disabled = disabled;
+
+      if (fixLabel) {
+        if (selSize === total || selSize === 0) {
+          fixLabel.textContent = 'Fix All Metadata';
+        } else {
+          fixLabel.textContent = `Fix Selected (${selSize})`;
+        }
+      }
+    },
+
+    async _fixImportMetadata(data) {
+      const tracks = data.tracks || [];
+      const selectedIndices = Array.from(this._selectedTrackIndices);
+      if (!selectedIndices.length) {
+        this._toast('No tracks selected to fix');
+        return;
+      }
+
+      const progressWrap = document.getElementById('ytm-import-progress-wrap');
+      const progressBar  = document.getElementById('ytm-import-progress-bar');
+      const progressText = document.getElementById('ytm-import-progress-text');
+      const cancelBtn    = document.getElementById('ytm-import-cancel-btn');
+      const actionsBar   = document.querySelector('.ytm-import-actions-bar');
+      const trackListEl  = document.getElementById('ytm-import-track-list');
+
+      if (progressWrap) progressWrap.classList.remove('hidden');
+      if (actionsBar) actionsBar.classList.add('hidden');
+      if (cancelBtn) cancelBtn.classList.remove('hidden');
+
+      this._fixAbortController = new AbortController();
+      const signal = this._fixAbortController.signal;
+
+      cancelBtn.onclick = () => {
+        if (this._fixAbortController) {
+          this._fixAbortController.abort();
+        }
+      };
+
+      let fixedCount = 0;
+      const total = selectedIndices.length;
+
+      try {
+        for (let i = 0; i < selectedIndices.length; i++) {
+          if (signal.aborted) {
+            throw new DOMException('Metadata fix stopped by user', 'AbortError');
+          }
+
+          const idx = selectedIndices[i];
+          const t = tracks[idx];
+          if (!t) continue;
+
+          const pct = Math.round(((i + 1) / total) * 100);
+          if (progressBar) progressBar.style.width = `${pct}%`;
+          if (progressText) progressText.textContent = `Fixing ${i + 1}/${total}: "${t.title}"…`;
+
+          // 1. First run algorithmic cleaner
+          const localCleaned = cleanTitleAndArtist(t.title, t.artist, 'MUSIC_PAGE_TYPE_USER_CHANNEL', true);
+          let targetTitle = localCleaned.title;
+          let targetArtist = localCleaned.artist;
+          let targetCover = t.thumb || (t.videoId ? ytThumb(t.videoId, 'hqdefault') : null);
+
+          // 2. Query canonical metadata fetcher (iTunes / Deezer)
+          let canonical = null;
+          try {
+            canonical = await fetchCanonicalMetadata(targetTitle, targetArtist, (u, o) => this._apiFetch(u, o));
+          } catch (_) {}
+
+          if (canonical) {
+            if (canonical.title) targetTitle = canonical.title;
+            if (canonical.artist) targetArtist = canonical.artist;
+            if (canonical.album) t.album = canonical.album;
+            if (canonical.thumb) targetCover = canonical.thumb;
+          }
+
+          // Update track data object
+          t.title = targetTitle;
+          t.artist = targetArtist;
+          if (targetCover) t.thumb = targetCover;
+
+          // Update DOM row in tracklist
+          if (trackListEl) {
+            const row = trackListEl.querySelector(`.ytm-import-track-row[data-idx="${idx}"]`);
+            if (row) {
+              const titleEl = row.querySelector('.ytm-import-track-title');
+              const artistEl = row.querySelector('.ytm-import-track-sub');
+              const thumbEl = row.querySelector('.ytm-import-track-thumb');
+
+              if (titleEl) {
+                titleEl.innerHTML = `${esc(targetTitle)} <span class="ytm-meta-fixed-pill">Fixed</span>`;
+              }
+              if (artistEl) {
+                artistEl.textContent = targetArtist;
+              }
+              if (thumbEl && targetCover) {
+                thumbEl.src = targetCover;
+              }
+            }
+          }
+
+          // If first track has an upgraded cover, update playlist hero thumb
+          if (idx === 0 && targetCover) {
+            const heroThumb = document.querySelector('.ytm-import-thumb');
+            if (heroThumb) heroThumb.src = targetCover;
+            data.thumb = targetCover;
+          }
+
+          fixedCount++;
+        }
+
+        this._toast(`Fixed metadata for ${fixedCount} track${fixedCount === 1 ? '' : 's'}!`);
+      } catch (err) {
+        if (err.name === 'AbortError') {
+          this._toast('Metadata fix cancelled');
+        } else {
+          console.error(`${PLUGIN_LABEL} metadata fix error:`, err);
+          this._toast(`Metadata fix error: ${err.message}`);
+        }
+      } finally {
+        this._fixAbortController = null;
+        if (progressWrap) progressWrap.classList.add('hidden');
+        if (actionsBar) actionsBar.classList.remove('hidden');
+        if (progressBar) progressBar.style.width = '0%';
+      }
     },
 
     async _startImport(data) {

@@ -5,7 +5,7 @@
   "author": "Audion Community",
   "description": "Full YouTube Music client — browse Home, Hot Tracks, Trending, search artists/albums/playlists, import playlists from URLs, play and save tracks. Uses YouTube Music InnerTube API (WEB_REMIX) + Piped/Invidious/InnerTube stream fallback chain. No API key required.",
   "repo": "https://github.com/dupitydumb/youtub-music",
-  "manifest_url": null,
+  "manifest_url": "https://github.com/dupitydumb/youtub-music/blob/main/plugin.json",
   "type": "js",
   "entry": "index.js",
   "permissions": [

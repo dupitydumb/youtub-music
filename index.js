@@ -214,7 +214,7 @@
 
     return {
       title: title || rawTitle,
-      artist: artist || rawArtist || 'Unknown Artist'
+      artist: artist || rawArtist || ''
     };
   }
 
@@ -969,7 +969,7 @@
     for (const s of sections) {
       if (s.items) {
         for (const item of s.items) {
-          if (item.videoId && (!item.artist || isStatOrType(item.artist))) {
+          if (item.videoId && (!item.artist || item.artist === 'Unknown Artist' || isStatOrType(item.artist))) {
             item.artist = name;
           }
         }
@@ -992,27 +992,48 @@
     const subRuns = header?.subtitle?.runs || [];
     if (!artist) {
       const artistRun = subRuns.find(r => r.navigationEndpoint?.browseEndpoint?.browseId);
-      artist = subRuns.filter(r => r.navigationEndpoint?.browseEndpoint).map(r => r.text).join('') ||
-               getText(header?.subtitle);
-      artistBrowseId = artistRun?.navigationEndpoint?.browseEndpoint?.browseId || null;
+      const filtered = subRuns.filter(r => r.navigationEndpoint?.browseEndpoint).map(r => r.text).join('');
+      if (filtered && !isStatOrType(filtered)) {
+        artist = filtered;
+        artistBrowseId = artistRun?.navigationEndpoint?.browseEndpoint?.browseId || null;
+      }
     }
+    if (!artist || isStatOrType(artist)) {
+      const desc = data?.microformat?.microformatDataRenderer?.description || '';
+      const parts = desc.split('•').map(s => s.trim()).filter(Boolean);
+      for (const p of parts) {
+        if (!isStatOrType(p)) {
+          artist = p;
+          break;
+        }
+      }
+    }
+
     const year = subRuns.find(r => /^\d{4}$/.test(r.text?.trim()))?.text;
     const thumb = bestThumb(
       header?.thumbnail?.croppedSquareThumbnailRenderer?.thumbnail?.thumbnails ||
-      header?.thumbnail?.musicThumbnailRenderer?.thumbnail?.thumbnails
+      header?.thumbnail?.musicThumbnailRenderer?.thumbnail?.thumbnails ||
+      data?.microformat?.microformatDataRenderer?.thumbnail?.thumbnails
     );
+
     // Collect tracks via generic section collector
     const sections = collectSections(data);
     const trackSection = sections.find(s => s.items.some(i => i.videoId));
-    const tracks = (trackSection?.items || []).map((p, idx) => ({
-      ...p,
-      trackNumber: idx + 1,
-      artist: (p.artist && !isStatOrType(p.artist)) ? p.artist : (artist || 'Unknown Artist'),
-      album: p.album || title,
-      albumArtist: p.albumArtist || artist,
-      thumb: p.thumb || (p.videoId ? ytThumb(p.videoId, 'hqdefault') : null) || thumb,
-      artistBrowseId: p.artistBrowseId || artistBrowseId,
-    }));
+    const tracks = (trackSection?.items || []).map((p, idx) => {
+      const hasSpecificArtist = p.artist && p.artist !== 'Unknown Artist' && !isStatOrType(p.artist);
+      const trackArtist = hasSpecificArtist ? p.artist : (artist || 'Unknown Artist');
+      const trackArtistBrowseId = hasSpecificArtist ? (p.artistBrowseId || null) : (artistBrowseId || null);
+
+      return {
+        ...p,
+        trackNumber: idx + 1,
+        artist: trackArtist,
+        album: title || p.album,
+        albumArtist: artist || p.albumArtist || 'Unknown Artist',
+        thumb: p.thumb || (p.videoId ? ytThumb(p.videoId, 'hqdefault') : null) || thumb,
+        artistBrowseId: trackArtistBrowseId,
+      };
+    });
     return { type: 'album', title, artist, artistBrowseId, year, thumb, browseId, tracks };
   }
 
@@ -1029,7 +1050,7 @@
     const sections = collectSections(data);
     const trackSection = sections.find(s => s.items.some(i => i.videoId));
     const tracks = (trackSection?.items || []).map(p => {
-      let trackArtist = (p.artist && !isStatOrType(p.artist)) ? p.artist : '';
+      let trackArtist = (p.artist && p.artist !== 'Unknown Artist' && !isStatOrType(p.artist)) ? p.artist : '';
       let trackTitle = p.title || '';
       if (!trackArtist || trackArtist === owner) {
         const cleaned = cleanTitleAndArtist(trackTitle, trackArtist || owner, 'MUSIC_PAGE_TYPE_USER_CHANNEL', true);
@@ -2512,9 +2533,14 @@
         try {
           const dur = t.duration || videoDurationCache.get(t.videoId) || null;
           const trackCover = t.thumb || (t.videoId ? ytThumb(t.videoId, 'hqdefault') : null) || thumb;
+          const trackArtist = (t.artist && t.artist !== 'Unknown Artist')
+            ? t.artist
+            : (t.albumArtist && t.albumArtist !== 'Unknown Artist'
+                ? t.albumArtist
+                : 'Unknown Artist');
           const trackId = await this.api.library.addExternalTrack({
             title:       t.title,
-            artist:      t.artist || 'Unknown Artist',
+            artist:      trackArtist,
             album:       t.album || title,
             duration:    dur || null,
             cover_url:   trackCover,
@@ -3277,9 +3303,12 @@
           for (const t of album.tracks) {
             if (!t.videoId) continue;
             const dur = t.duration || videoDurationCache.get(t.videoId) || null;
+            const trackArtist = (t.artist && t.artist !== 'Unknown Artist')
+              ? t.artist
+              : (album.artist || t.albumArtist || 'Unknown Artist');
             await this.api.library.addExternalTrack({
               title:       t.title,
-              artist:      t.artist || album.artist || 'Unknown Artist',
+              artist:      trackArtist,
               album:       album.title,
               duration:    dur || null,
               cover_url:   album.thumb || t.thumb || ytThumb(t.videoId),
@@ -3514,10 +3543,13 @@
         const fullQueue = queueItems.filter(t => t.videoId).map(t => {
           const qId = Math.abs(t.videoId.split('').reduce((acc, c) => ((acc << 5) - acc) + c.charCodeAt(0) | 0, 0)) || Date.now();
           const isTarget = t.videoId === track.videoId;
+          const trackArtist = (t.artist && t.artist !== 'Unknown Artist')
+            ? t.artist
+            : (t.albumArtist || '');
           return {
             id:          qId,
             title:       t.title,
-            artist:      t.artist || '',
+            artist:      trackArtist,
             album:       t.album || '',
             duration:    t.duration || (isTarget ? exactDuration : null),
             cover_url:   t.thumb || ytThumb(t.videoId),
@@ -3585,9 +3617,15 @@
             if (durEl) durEl.textContent = fmtDuration(dur);
           }
 
+          const finalArtist = (track.artist && track.artist !== 'Unknown Artist')
+            ? track.artist
+            : (track.albumArtist && track.albumArtist !== 'Unknown Artist'
+                ? track.albumArtist
+                : 'Unknown Artist');
+
           await this.api.library.addExternalTrack({
             title:       track.title,
-            artist:      track.artist || 'Unknown Artist',
+            artist:      finalArtist,
             album:       track.album  || '',
             duration:    dur || null,
             cover_url:   track.thumb || ytThumb(track.videoId),
@@ -3612,10 +3650,13 @@
     async _queueTrack(track, playNext = false) {
       if (!track?.videoId) return;
       const qId = Math.abs(track.videoId.split('').reduce((acc, c) => ((acc << 5) - acc) + c.charCodeAt(0) | 0, 0)) || Date.now();
+      const trackArtist = (track.artist && track.artist !== 'Unknown Artist')
+        ? track.artist
+        : (track.albumArtist || '');
       const trackObj = {
         id:          qId,
         title:       track.title,
-        artist:      track.artist || '',
+        artist:      trackArtist,
         album:       track.album || '',
         duration:    track.duration || null,
         cover_url:   track.thumb || ytThumb(track.videoId),

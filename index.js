@@ -541,6 +541,51 @@
     return out;
   }
 
+  function classifyMusicItem(item, parsed = {}) {
+    if (!item) return { musicVideoType: null, isSong: false, isVideo: false, itemKind: 'other' };
+
+    const twoRow = item.musicTwoRowItemRenderer;
+    const listItem = item.musicResponsiveListItemRenderer;
+    const card = item.musicCardShelfRenderer;
+
+    let mType = null;
+    if (twoRow) {
+      const nav = twoRow.navigationEndpoint;
+      mType = (nav?.watchEndpoint || nav?.watchPlaylistEndpoint)?.watchEndpointMusicSupportedConfigs?.watchEndpointMusicConfig?.musicVideoType;
+    } else if (listItem) {
+      const overlayEndpoint = listItem.overlay?.musicItemThumbnailOverlayRenderer?.content?.musicPlayButtonRenderer?.playNavigationEndpoint;
+      const col0Nav = listItem.flexColumns?.[0]?.musicResponsiveListItemFlexColumnRenderer?.text?.runs?.[0]?.navigationEndpoint;
+      mType = (overlayEndpoint?.watchEndpoint || col0Nav?.watchEndpoint || listItem.navigationEndpoint?.watchEndpoint)
+        ?.watchEndpointMusicSupportedConfigs?.watchEndpointMusicConfig?.musicVideoType;
+    } else if (card) {
+      const playBtn = card.buttons?.find(b => b.musicPlayButtonRenderer)?.musicPlayButtonRenderer?.playNavigationEndpoint?.watchEndpoint;
+      mType = (playBtn || card.onTap?.watchEndpoint || card.title?.runs?.[0]?.navigationEndpoint?.watchEndpoint)
+        ?.watchEndpointMusicSupportedConfigs?.watchEndpointMusicConfig?.musicVideoType;
+    }
+
+    let isSong = false;
+    let isVideo = false;
+
+    if (mType === 'MUSIC_VIDEO_TYPE_ATV' || mType === 'MUSIC_VIDEO_TYPE_OFFICIAL_SOURCE_MUSIC') {
+      isSong = true;
+    } else if (mType === 'MUSIC_VIDEO_TYPE_OMV' || mType === 'MUSIC_VIDEO_TYPE_UGC' || mType === 'MUSIC_VIDEO_TYPE_PODCAST_EPISODE') {
+      isVideo = true;
+    } else if (parsed?.album || parsed?.isVerifiedArtist) {
+      isSong = true;
+    } else {
+      const sub = (parsed?.subtitle || '').toLowerCase();
+      if (sub.startsWith('song') || /\bplays\b/i.test(sub)) {
+        isSong = true;
+      } else if (sub.startsWith('video') || /\bviews\b/i.test(sub)) {
+        isVideo = true;
+      }
+    }
+
+    const itemKind = isSong ? 'song' : isVideo ? 'video' : (parsed?.pageType?.includes('ARTIST') ? 'artist' : parsed?.pageType?.includes('ALBUM') ? 'album' : 'other');
+
+    return { musicVideoType: mType || null, isSong, isVideo, itemKind };
+  }
+
   function parseMusicItem(item) {
     if (!item) return null;
 
@@ -583,6 +628,8 @@
         if (match) duration = parseDurationText(match[0]);
       }
 
+      const kind = classifyMusicItem(item, { subtitle, pageType });
+
       // For songs embedded in a carousel (they have a watchEndpoint in a menu or the item itself)
       if (videoId) {
         let cardArtist = '';
@@ -594,9 +641,36 @@
           }
         }
         const cleaned = cleanTitleAndArtist(title, cardArtist, pageType, true);
-        return { title: cleaned.title, artist: cleaned.artist, thumb, browseId, videoId, playlistId, subtitle, pageType, duration };
+        return {
+          title: cleaned.title,
+          artist: cleaned.artist,
+          thumb,
+          browseId,
+          videoId,
+          playlistId,
+          subtitle,
+          pageType,
+          duration,
+          musicVideoType: kind.musicVideoType,
+          isSong: kind.isSong,
+          isVideo: kind.isVideo,
+          itemKind: kind.itemKind,
+        };
       }
-      return { title, thumb, browseId, videoId, playlistId, subtitle, pageType, duration };
+      return {
+        title,
+        thumb,
+        browseId,
+        videoId,
+        playlistId,
+        subtitle,
+        pageType,
+        duration,
+        musicVideoType: kind.musicVideoType,
+        isSong: kind.isSong,
+        isVideo: kind.isVideo,
+        itemKind: kind.itemKind,
+      };
     }
 
     // --- musicResponsiveListItemRenderer (track rows in search/album/playlist) ---
@@ -731,7 +805,26 @@
         b.musicInlineBadgeRenderer?.icon?.iconType === 'MUSIC_EXPLICIT_BADGE'
       ));
 
-      return { title, artist, album, artistBrowseId, albumBrowseId, thumb, videoId, browseId, pageType, duration, isExplicit };
+      const subText = cols.map(c => getText(c?.musicResponsiveListItemFlexColumnRenderer?.text)).join(' • ');
+      const kind = classifyMusicItem(item, { subtitle: subText, album, isVerifiedArtist, pageType });
+
+      return {
+        title,
+        artist,
+        album,
+        artistBrowseId,
+        albumBrowseId,
+        thumb,
+        videoId,
+        browseId,
+        pageType,
+        duration,
+        isExplicit,
+        musicVideoType: kind.musicVideoType,
+        isSong: kind.isSong,
+        isVideo: kind.isVideo,
+        itemKind: kind.itemKind,
+      };
     }
 
     return null;
@@ -742,9 +835,10 @@
   const API = {
 
     async search(query, apiFetch, filter = null) {
-      // filter: 'songs' | 'albums' | 'artists' | 'playlists' | null (all)
+      // filter: 'songs' | 'videos' | 'albums' | 'artists' | 'playlists' | null (all)
       const params = {
         songs:     'EgWKAQIIAWoKEAoQBRAJEAMQBA%3D%3D',
+        videos:    'EgWKAQIQAWoKEAoQBRAJEAMQBA%3D%3D',
         albums:    'EgWKAQIYAWoKEAoQBRAJEAMQBA%3D%3D',
         artists:   'EgWKAQIgAWoKEAoQBRAJEAMQBA%3D%3D',
         playlists: 'EgWKAQIoAWoKEAoQBRAJEAMQBA%3D%3D',
@@ -853,8 +947,10 @@
     }
 
     const sections = [];
-    const songs = [];
+    const officialSongs = [];
+    const videos = [];
     const entities = [];
+    let rawHeroCard = null;
 
     for (const c of tab.contents) {
       if (c.musicCardShelfRenderer) {
@@ -901,19 +997,42 @@
           cardArtist = cleaned.artist;
         }
 
-        const topTracks = (card.contents || []).map(parseMusicItem).filter(Boolean);
-        sections.push({
+        const cardKind = classifyMusicItem(c, { subtitle, pageType });
+        const cardTracks = (card.contents || []).map(parseMusicItem).filter(Boolean);
+
+        rawHeroCard = {
           _type: 'card-hero',
           title: 'Top Result',
-          item: { title: heroTitle, subtitle, thumb, browseId, pageType, videoId, artist: cardArtist, duration: cardDuration },
-          items: topTracks
-        });
+          item: {
+            title: heroTitle,
+            subtitle,
+            thumb,
+            browseId,
+            pageType,
+            videoId,
+            artist: cardArtist,
+            duration: cardDuration,
+            musicVideoType: cardKind.musicVideoType,
+            isSong: cardKind.isSong,
+            isVideo: cardKind.isVideo,
+            itemKind: cardKind.itemKind,
+          },
+          items: cardTracks,
+        };
       } else if (c.itemSectionRenderer) {
         for (const itemWrapper of (c.itemSectionRenderer.contents || [])) {
           const parsed = parseMusicItem(itemWrapper);
           if (parsed) {
             if (parsed.videoId) {
-              songs.push(parsed);
+              if (parsed.isSong && !parsed.isVideo) {
+                officialSongs.push(parsed);
+              } else if (parsed.isVideo) {
+                videos.push(parsed);
+              } else if (parsed.album || parsed.artistBrowseId) {
+                officialSongs.push(parsed);
+              } else {
+                videos.push(parsed);
+              }
             } else if (parsed.browseId) {
               entities.push(parsed);
             }
@@ -925,11 +1044,49 @@
       }
     }
 
-    if (songs.length) {
-      sections.push({ title: 'Songs', items: songs, _type: 'shelf' });
+    // Top Result Hero Resolution (Option A: Prioritize official studio song)
+    if (rawHeroCard) {
+      const isCardArtist = rawHeroCard.item.pageType?.includes('ARTIST') || rawHeroCard.item.browseId?.startsWith('UC');
+      const isCardAlbum = rawHeroCard.item.pageType?.includes('ALBUM') || rawHeroCard.item.browseId?.startsWith('MPRE');
+
+      if (!isCardArtist && !isCardAlbum && rawHeroCard.item.isVideo && officialSongs.length > 0) {
+        // Promote top official studio song to Top Result Hero
+        const promotedSong = officialSongs[0];
+        // Move original video hero item to videos array if not already present
+        if (!videos.some(v => v.videoId === rawHeroCard.item.videoId)) {
+          videos.unshift(rawHeroCard.item);
+        }
+        // Move any card items that were videos to videos array
+        for (const it of rawHeroCard.items) {
+          if (it.isVideo && !videos.some(v => v.videoId === it.videoId)) {
+            videos.push(it);
+          }
+        }
+
+        sections.push({
+          _type: 'card-hero',
+          title: 'Top Result',
+          item: {
+            ...promotedSong,
+            subtitle: `Song • ${promotedSong.artist}${promotedSong.album ? ' • ' + promotedSong.album : ''}`,
+            isSong: true,
+            isVideo: false,
+          },
+          items: officialSongs.slice(1, 5),
+        });
+      } else {
+        sections.push(rawHeroCard);
+      }
+    }
+
+    if (officialSongs.length) {
+      sections.push({ title: 'Songs', items: officialSongs, _type: 'shelf' });
     }
     if (entities.length) {
       sections.push({ title: 'Albums, Artists & Playlists', items: entities, _type: 'carousel' });
+    }
+    if (videos.length) {
+      sections.push({ title: 'Videos', items: videos, _type: 'shelf' });
     }
 
     return sections.length ? sections : collectSections(data);
@@ -1438,6 +1595,7 @@
 
     .ytm-num { font-size: 11px; font-weight: 700; color: var(--text-subdued, #8e8e8e); flex-shrink: 0; min-width: 16px; text-align: center; }
     .ytm-explicit { font-size: 9px; font-weight: 800; background: var(--bg-highlight, #3e3e3e); color: #fff; padding: 1px 4px; border-radius: 2px; margin-left: 6px; }
+    .ytm-video-badge { font-size: 9px; font-weight: 700; background: rgba(255, 255, 255, 0.12); color: var(--text-secondary, #aaa); padding: 1px 4px; border-radius: 2px; margin-left: 6px; text-transform: uppercase; letter-spacing: 0.3px; }
 
     /* ═══ Top Result Card (All search) ═══ */
     .ytm-top-result-section { padding-bottom: 4px; }
@@ -1709,6 +1867,7 @@
 
   const YouTubeMusic = {
     api:        null,
+    _API:       API,
     isOpen:     false,
     libraryIds: new Set(),
     _searchTimer: null,
@@ -1718,7 +1877,7 @@
     _currentView: null,
     _currentData: null,
     _currentTitle: 'YouTube Music',
-    _searchFilter: null, // null | 'songs' | 'albums' | 'artists' | 'playlists'
+    _searchFilter: 'songs', // default to 'songs' to prioritize studio music
     _activeTab: 'home',
     _playingVideoId: null,
     _searchCache: new MemCache(5 * 60 * 1000),   // 5 min
@@ -1731,6 +1890,7 @@
       pipedInstances: [...PIPED_INSTANCES],
       invidiousInstances: [...INVIDIOUS_INSTANCES],
       preferredQuality: 'best', // 'best' | 'low'
+      preferStudioAudio: true, // auto-switch videos to studio audio tracks
     },
 
     // ─── Init ──────────────────────────────────────────────────────────────────
@@ -1795,6 +1955,7 @@
           if (p.pipedInstances?.length) this.config.pipedInstances = p.pipedInstances;
           if (p.invidiousInstances?.length) this.config.invidiousInstances = p.invidiousInstances;
           if (p.preferredQuality) this.config.preferredQuality = p.preferredQuality;
+          if (typeof p.preferStudioAudio === 'boolean') this.config.preferStudioAudio = p.preferStudioAudio;
         }
       } catch (e) { /* ignore */ }
     },
@@ -1821,7 +1982,7 @@
         const sections = await API.search(q, (u, o) => this._apiFetch(u, o), 'songs');
         const all = sections.flatMap(s => s.items).filter(i => i.videoId);
         if (!all.length) return onResult({ sourceId: SOURCE_TYPE, status: 'not_found' });
-        const best = all[0];
+        const best = all.find(i => i.isSong && !i.isVideo) || all[0];
         onResult({
           sourceId: SOURCE_TYPE, status: 'success',
           title: best.title, artist: best.artist, duration: best.duration,
@@ -1911,8 +2072,8 @@
           </div>
         </div>
         <div class="ytm-filter-row hidden" id="ytm-filter-row" role="group" aria-label="Search categories">
-          <button class="ytm-chip active" data-filter="" aria-pressed="true">All</button>
-          <button class="ytm-chip" data-filter="songs" aria-pressed="false">${ICON.music} Songs</button>
+          <button class="ytm-chip" data-filter="" aria-pressed="false">All</button>
+          <button class="ytm-chip active" data-filter="songs" aria-pressed="true">${ICON.music} Songs</button>
           <button class="ytm-chip" data-filter="albums" aria-pressed="false">${ICON.album} Albums</button>
           <button class="ytm-chip" data-filter="artists" aria-pressed="false">${ICON.artist} Artists</button>
           <button class="ytm-chip" data-filter="playlists" aria-pressed="false">${ICON.list} Playlists</button>
@@ -1929,6 +2090,15 @@
       if (!body) return;
 
       body.innerHTML = `
+        <p class="ytm-field-label">Audio & Music Preference</p>
+        <label class="ytm-checkbox-label" style="display:flex;align-items:center;gap:10px;cursor:pointer;margin-top:8px;font-size:13px;color:var(--text-primary,#fff);">
+          <input type="checkbox" id="ytm-prefer-studio" ${this.config.preferStudioAudio !== false ? 'checked' : ''} style="cursor:pointer;accent-color:var(--ytm-red,#ff0033);width:16px;height:16px;">
+          <span><strong>Prioritize Studio Audio</strong>: Auto-replace music videos with official album tracks</span>
+        </label>
+        <p class="ytm-field-hint" style="margin-top:4px;">When playing music videos or video links, automatically resolves to the studio album recording to avoid video dialogue, silence, and sound effects.</p>
+
+        <hr class="ytm-divider">
+
         <p class="ytm-field-label">Piped API Instances</p>
         <p class="ytm-field-hint">Used as stream fallback when InnerTube returns ciphered URLs. Enter full base URLs.</p>
         <div id="ytm-piped-list"></div>
@@ -1963,6 +2133,7 @@
       };
       document.getElementById('ytm-settings-save').onclick = async () => {
         // Collect values from inputs
+        this.config.preferStudioAudio = document.getElementById('ytm-prefer-studio')?.checked ?? true;
         this.config.pipedInstances = [...document.querySelectorAll('#ytm-piped-list .ytm-text-input')].map(el => el.value.trim()).filter(Boolean);
         this.config.invidiousInstances = [...document.querySelectorAll('#ytm-inv-list .ytm-text-input')].map(el => el.value.trim()).filter(Boolean);
         await this._saveConfig();
@@ -2935,7 +3106,9 @@
       const heroCard = document.createElement('div');
       heroCard.className = 'ytm-top-result-card';
       const isArtist = section.item.pageType?.includes('ARTIST') || section.item.browseId?.startsWith('UC');
+      const isVideo = section.item.isVideo;
       const thumbUrl = section.item.thumb || '';
+      const badgeText = isArtist ? 'Artist' : (isVideo ? 'Video' : 'Song');
 
       heroCard.innerHTML = `
         <div class="ytm-top-result-left">
@@ -2943,7 +3116,7 @@
           <div class="ytm-top-result-info">
             <div class="ytm-top-result-title">${esc(section.item.title)}</div>
             <div class="ytm-top-result-sub">${esc(section.item.subtitle || (isArtist ? 'Artist' : ''))}</div>
-            <span class="ytm-top-result-badge">${isArtist ? 'Artist' : 'Top Result'}</span>
+            <span class="ytm-top-result-badge">${badgeText}</span>
           </div>
         </div>
       `;
@@ -3065,6 +3238,7 @@
         const thumb = item.thumb || ytThumb(item.videoId);
         const fallbackThumb = ytThumb(item.videoId);
         const explicit = item.isExplicit ? `<span class="ytm-explicit" title="Explicit">E</span>` : '';
+        const videoBadge = (item.isVideo && !item.isSong) ? `<span class="ytm-video-badge" title="Music Video">Video</span>` : '';
 
         const row = document.createElement('div');
         row.className = `ytm-track${isPlaying ? ' playing' : ''}`;
@@ -3078,7 +3252,7 @@
             <div class="ytm-play-ov">${isPlaying ? ICON.pause : ICON.play}</div>
           </div>
           <div class="ytm-track-info">
-            <div class="ytm-track-title">${esc(item.title)}${explicit}</div>
+            <div class="ytm-track-title">${esc(item.title)}${explicit}${videoBadge}</div>
             <div class="ytm-track-sub">
               ${item.artist ? `<span class="ytm-link ytm-artist-link" data-id="${item.artistBrowseId || ''}" tabindex="0" role="button" aria-label="View artist ${esc(item.artist)}">${esc(item.artist)}</span>` : ''}
               ${item.artist && item.album ? ' · ' : ''}
@@ -3517,13 +3691,57 @@
 
     // ─── Playback ──────────────────────────────────────────────────────────────
 
+    async _resolveOfficialSong(track) {
+      if (!track || !track.title) return null;
+      if (track.isSong && !track.isVideo && track.musicVideoType === 'MUSIC_VIDEO_TYPE_ATV') {
+        return null;
+      }
+      try {
+        const q = `${track.title} ${track.artist || ''}`
+          .replace(/\(Official Music Video\)|\(Official Video\)|\(Lyric Video\)|\[MV\]|\[Official Video\]/gi, '')
+          .trim();
+        const searchSections = await API.search(q, (u, o) => this._apiFetch(u, o), 'songs');
+        const songs = (searchSections.find(s => s.title === 'Songs' || s._type === 'shelf')?.items || [])
+          .filter(it => it.videoId && it.isSong && !it.isVideo);
+        if (!songs.length) return null;
+
+        const best = songs[0];
+        if (best.videoId && best.videoId !== track.videoId) {
+          return best;
+        }
+      } catch (e) {
+        console.warn(`${PLUGIN_LABEL} resolveOfficialSong failed:`, e);
+      }
+      return null;
+    },
+
     async _playTrack(track, queue = []) {
       if (!track?.videoId) return;
-      this._toast(`Loading "${track.title}"…`);
+
+      let targetTrack = track;
+      if (this.config.preferStudioAudio !== false && (track.isVideo || track.musicVideoType === 'MUSIC_VIDEO_TYPE_OMV' || track.musicVideoType === 'MUSIC_VIDEO_TYPE_UGC')) {
+        const studioSong = await this._resolveOfficialSong(track);
+        if (studioSong) {
+          this._toast(`Playing studio audio for "${studioSong.title}"…`);
+          targetTrack = {
+            ...track,
+            videoId: studioSong.videoId,
+            title: studioSong.title,
+            artist: studioSong.artist || track.artist,
+            album: studioSong.album || track.album,
+            thumb: studioSong.thumb || track.thumb,
+            duration: studioSong.duration || track.duration,
+            isSong: true,
+            isVideo: false,
+          };
+        }
+      }
+
+      this._toast(`Loading "${targetTrack.title}"…`);
 
       try {
         // Resolve stream and proxy through Rust → blob: URL to bypass CORS.
-        const rawStreamUrl = await resolveStream(track.videoId, (u, o) => this._apiFetch(u, o));
+        const rawStreamUrl = await resolveStream(targetTrack.videoId, (u, o) => this._apiFetch(u, o));
         if (!rawStreamUrl) throw new Error('Stream resolution returned null');
 
         let finalUrl = rawStreamUrl;
@@ -3536,42 +3754,43 @@
           }
         }
 
-        const exactDuration = track.duration || videoDurationCache.get(track.videoId) || null;
+        const exactDuration = targetTrack.duration || videoDurationCache.get(targetTrack.videoId) || null;
 
         // Build clean queue array
-        const queueItems = (Array.isArray(queue) && queue.length > 0) ? queue : [track];
+        const queueItems = (Array.isArray(queue) && queue.length > 0) ? queue : [targetTrack];
         const fullQueue = queueItems.filter(t => t.videoId).map(t => {
-          const qId = Math.abs(t.videoId.split('').reduce((acc, c) => ((acc << 5) - acc) + c.charCodeAt(0) | 0, 0)) || Date.now();
-          const isTarget = t.videoId === track.videoId;
-          const trackArtist = (t.artist && t.artist !== 'Unknown Artist')
-            ? t.artist
-            : (t.albumArtist || '');
+          const isTarget = t.videoId === track.videoId || t.videoId === targetTrack.videoId;
+          const actualItem = isTarget ? targetTrack : t;
+          const qId = Math.abs(actualItem.videoId.split('').reduce((acc, c) => ((acc << 5) - acc) + c.charCodeAt(0) | 0, 0)) || Date.now();
+          const trackArtist = (actualItem.artist && actualItem.artist !== 'Unknown Artist')
+            ? actualItem.artist
+            : (actualItem.albumArtist || '');
           return {
             id:          qId,
-            title:       t.title,
+            title:       actualItem.title,
             artist:      trackArtist,
-            album:       t.album || '',
-            duration:    t.duration || (isTarget ? exactDuration : null),
-            cover_url:   t.thumb || ytThumb(t.videoId),
+            album:       actualItem.album || '',
+            duration:    actualItem.duration || (isTarget ? exactDuration : null),
+            cover_url:   actualItem.thumb || ytThumb(actualItem.videoId),
             source_type: SOURCE_TYPE,
-            external_id: t.videoId,
-            path:        `${SOURCE_TYPE}://${t.videoId}`,
+            external_id: actualItem.videoId,
+            path:        `${SOURCE_TYPE}://${actualItem.videoId}`,
             stream_url:  isTarget ? finalUrl : null,
           };
         });
 
-        const startIndex = Math.max(0, fullQueue.findIndex(t => t.external_id === track.videoId));
+        const startIndex = Math.max(0, fullQueue.findIndex(t => t.external_id === targetTrack.videoId));
 
         if (typeof this.api.player.playQueue === 'function') {
           await this.api.player.playQueue(fullQueue, startIndex, {
             type: SOURCE_TYPE,
-            name: track.title,
+            name: targetTrack.title,
           });
         } else {
           await this.api.player.setTrack(fullQueue[startIndex]);
         }
 
-        this._playingVideoId = track.videoId;
+        this._playingVideoId = targetTrack.videoId;
         this._updatePlayingHighlight();
       } catch (e) {
         console.error(`${PLUGIN_LABEL} playback failed:`, e);
@@ -3581,19 +3800,26 @@
 
     async _saveTrack(track, rowEl) {
       try {
-        const isSaved = this.libraryIds.has(track.videoId);
+        let targetTrack = track;
+        if (this.config.preferStudioAudio !== false && (track.isVideo || track.musicVideoType === 'MUSIC_VIDEO_TYPE_OMV' || track.musicVideoType === 'MUSIC_VIDEO_TYPE_UGC')) {
+          const studioSong = await this._resolveOfficialSong(track);
+          if (studioSong) targetTrack = studioSong;
+        }
+
+        const isSaved = this.libraryIds.has(targetTrack.videoId) || this.libraryIds.has(track.videoId);
         const btn = rowEl?.querySelector?.('.ytm-save-btn-row');
 
         if (isSaved) {
           const libTracks = await this.api.library?.getTracks?.() || [];
-          const matched = libTracks.find(lt => lt.source_type === SOURCE_TYPE && lt.external_id === track.videoId);
+          const matched = libTracks.find(lt => lt.source_type === SOURCE_TYPE && (lt.external_id === targetTrack.videoId || lt.external_id === track.videoId));
           if (matched && typeof this.api.library?.removeTrack === 'function') {
             await this.api.library.removeTrack(matched.id);
           } else if (matched && typeof this.api.library?.deleteTrack === 'function') {
             await this.api.library.deleteTrack(matched.id);
           }
+          this.libraryIds.delete(targetTrack.videoId);
           this.libraryIds.delete(track.videoId);
-          this._toast(`Removed "${track.title}" from Library`);
+          this._toast(`Removed "${targetTrack.title}" from Library`);
           if (btn) {
             btn.classList.remove('saved');
             btn.innerHTML = ICON.heartO;
@@ -3601,14 +3827,14 @@
             btn.setAttribute('aria-label', 'Add to Library');
           }
         } else {
-          let dur = track.duration || videoDurationCache.get(track.videoId) || null;
-          if ((!dur || dur <= 0) && track.videoId) {
+          let dur = targetTrack.duration || videoDurationCache.get(targetTrack.videoId) || null;
+          if ((!dur || dur <= 0) && targetTrack.videoId) {
             try {
-              const watchData = await API.getWatchPlaylist(track.videoId, null, (u, o) => this._apiFetch(u, o));
+              const watchData = await API.getWatchPlaylist(targetTrack.videoId, null, (u, o) => this._apiFetch(u, o));
               if (watchData && watchData.length && watchData[0].duration > 0) {
                 dur = watchData[0].duration;
-                track.duration = dur;
-                videoDurationCache.set(track.videoId, dur);
+                targetTrack.duration = dur;
+                videoDurationCache.set(targetTrack.videoId, dur);
               }
             } catch (_) {}
           }
@@ -3617,24 +3843,24 @@
             if (durEl) durEl.textContent = fmtDuration(dur);
           }
 
-          const finalArtist = (track.artist && track.artist !== 'Unknown Artist')
-            ? track.artist
-            : (track.albumArtist && track.albumArtist !== 'Unknown Artist'
-                ? track.albumArtist
+          const finalArtist = (targetTrack.artist && targetTrack.artist !== 'Unknown Artist')
+            ? targetTrack.artist
+            : (targetTrack.albumArtist && targetTrack.albumArtist !== 'Unknown Artist'
+                ? targetTrack.albumArtist
                 : 'Unknown Artist');
 
           await this.api.library.addExternalTrack({
-            title:       track.title,
+            title:       targetTrack.title,
             artist:      finalArtist,
-            album:       track.album  || '',
+            album:       targetTrack.album  || '',
             duration:    dur || null,
-            cover_url:   track.thumb || ytThumb(track.videoId),
+            cover_url:   targetTrack.thumb || ytThumb(targetTrack.videoId),
             source_type: SOURCE_TYPE,
-            external_id: track.videoId,
+            external_id: targetTrack.videoId,
             liked:       false,
           });
-          this.libraryIds.add(track.videoId);
-          this._toast(`Added "${track.title}" to Library`);
+          this.libraryIds.add(targetTrack.videoId);
+          this._toast(`Added "${targetTrack.title}" to Library`);
           if (btn) {
             btn.classList.add('saved');
             btn.innerHTML = ICON.heart;

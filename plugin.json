@@ -1,7 +1,7 @@
 {
   "name": "YouTube Music",
   "safe_name": "youtube-music",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "author": "Audion Community",
   "description": "Full YouTube Music client — browse Home, Hot Tracks, Trending, search artists/albums/playlists, import playlists from URLs, play and save tracks. Uses YouTube Music InnerTube API (WEB_REMIX) + Piped/Invidious/InnerTube stream fallback chain. No API key required.",
   "repo": "https://github.com/dupitydumb/youtub-music",
@@ -23,7 +23,7 @@
     "mobile:home"
   ],
   "icon": "Youtube-Music-Logo.png",
-  "icon_url": null,
+  "icon_url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/6/6a/Youtube_Music_icon.svg/960px-Youtube_Music_icon.svg.png",
   "category": "library",
   "tags": [
     "youtube",

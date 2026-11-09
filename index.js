@@ -1,13 +1,10 @@
-// YouTube Music Plugin for Audion v1.0.0
-// Full YouTube Music client: Home feed, Trending, Search (songs/albums/artists/playlists),
-// Artist pages, Album pages, Playlist pages, Now Playing context.
-// Stream resolution: InnerTube ANDROID_TESTSUITE → ANDROID → TV_EMBEDDED → Piped → Invidious
-// No API key required. Uses YouTube Music WEB_REMIX InnerTube client for all browse/search.
+// YouTube Music Plugin for Audion v1.4.0
+// Client for YouTube Music: Personalized Home, Mood Feeds, Studio Prioritization, and URL Import.
 
 (function () {
   'use strict';
 
-  // ─── Constants ───────────────────────────────────────────────────────────────
+  // Constants
 
   const SOURCE_TYPE  = 'youtube';
   const PLUGIN_ID    = 'youtube-music';
@@ -73,7 +70,18 @@
     'https://vid.puffyan.us',
   ];
 
-  // ─── SVG Icons ───────────────────────────────────────────────────────────────
+  // Editorial mood category tokens (bypasses unvetted regional community playlists)
+  const HOME_VIBES = {
+    for_you:   { label: 'For You' },
+    chill:     { label: 'Chill',     params: 'ggMPOg1uX1JOQWZFeDByc2Jm' },
+    focus:     { label: 'Focus',     params: 'ggMPOg1uX0NvNGNhWThMYWRh' },
+    energize:  { label: 'Workout',   params: 'ggMPOg1uX2lRZUZiMnNrQnJW' },
+    feel_good: { label: 'Feel Good', params: 'ggMPOg1uXzZQbDB5eThLRTQ3' },
+    commute:   { label: 'Commute',   params: 'ggMPOg1uX044Z2o5WERLckpU' },
+    party:     { label: 'Party',     params: 'ggMPOg1uXzY3UGd5eTFzV2R1' },
+  };
+
+  // SVG Icons
 
   const ICON = {
     ytmusic: `<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.376 0 0 5.376 0 12s5.376 12 12 12 12-5.376 12-12S18.624 0 12 0zm0 19.104c-3.924 0-7.104-3.18-7.104-7.104S8.076 4.896 12 4.896s7.104 3.18 7.104 7.104-3.18 7.104-7.104 7.104zm0-13.332c-3.432 0-6.228 2.796-6.228 6.228S8.568 18.228 12 18.228s6.228-2.796 6.228-6.228S15.432 5.772 12 5.772zM9.684 15.54V8.46L15.816 12 9.684 15.54z"/></svg>`,
@@ -93,6 +101,8 @@
     artist:  `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>`,
     list:    `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>`,
     sync:    `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/></svg>`,
+    shuffle: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/></svg>`,
+    alert:   `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>`,
     settings:`<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>`,
     import:  `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>`,
     link:    `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>`,
@@ -100,7 +110,7 @@
     wand:    `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 4-2 4 4 2-4-2-2-4Z"/><path d="m3 21 9-9"/><path d="M12.2 6.8 4 15l2 2 8.2-8.2Z"/></svg>`,
   };
 
-  // ─── Helpers ─────────────────────────────────────────────────────────────────
+  // Helpers
 
   function esc(s) {
     return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -116,7 +126,7 @@
   function upgradeThumbUrl(url, targetSize = 800) {
     if (!url || typeof url !== 'string') return url;
 
-    // 1. Google Fife / Google User Content / GGPHT CDN (Used for official YTM covers & artist avatars)
+    // Google image CDN (Fife / ggpht)
     if (/googleusercontent\.com|ggpht\.com/i.test(url)) {
       if (/=([sw])\d+/i.test(url)) {
         return url.replace(/=([sw])\d+([^/]*)$/i, (match, prefix, rest) => {
@@ -135,7 +145,7 @@
       return url;
     }
 
-    // 2. YouTube Image CDN (i.ytimg.com)
+    // YouTube image CDN
     if (/ytimg\.com/i.test(url)) {
       const clean = url.split('?')[0];
       return clean.replace(/\/(?:mqdefault|default|sddefault)\.jpg$/i, '/hqdefault.jpg');
@@ -225,7 +235,7 @@
     const cacheKey = query.toLowerCase();
     if (canonicalMetaCache.has(cacheKey)) return canonicalMetaCache.get(cacheKey);
 
-    // 1. Primary: iTunes / Apple Music Search API
+    // iTunes search API fallback
     try {
       const url = `https://itunes.apple.com/search?term=${encodeURIComponent(query)}&entity=song&limit=1`;
       const res = await apiFetch(url, { headers: { 'User-Agent': 'Audion/1.0' } });
@@ -249,7 +259,7 @@
       }
     } catch (_) {}
 
-    // 2. Fallback: Deezer API
+    // Deezer API fallback
     try {
       const url = `https://api.deezer.com/search?q=${encodeURIComponent(query)}&limit=1`;
       const res = await apiFetch(url, { headers: { 'User-Agent': 'Audion/1.0' } });
@@ -316,17 +326,13 @@
     if (!urlOrId || typeof urlOrId !== 'string') return null;
     const str = urlOrId.trim();
 
-    // 1. Raw IDs:
-    // Playlists: PL..., OLAK5uy_..., RD..., VL...
     if (/^(VL)?(PL|OLAK5uy_|RD|UU|FL|LL)[a-zA-Z0-9_-]+$/.test(str)) {
       const listId = str.startsWith('VL') ? str.slice(2) : str;
       return { type: 'playlist', listId, browseId: `VL${listId}` };
     }
-    // Album browseId: MPREb_...
     if (/^MPREb_[a-zA-Z0-9_-]+$/.test(str)) {
       return { type: 'album', browseId: str };
     }
-    // Video ID: exactly 11 characters
     if (/^[a-zA-Z0-9_-]{11}$/.test(str)) {
       return { type: 'track', videoId: str };
     }
@@ -441,7 +447,7 @@
     return found;
   }
 
-  // ─── Cache ───────────────────────────────────────────────────────────────────
+  // In-memory cache
 
   class MemCache {
     constructor(defaultTtlMs = 300000) {
@@ -460,7 +466,7 @@
     clear() { this._store.clear(); }
   }
 
-  // ─── InnerTube Network Layer ─────────────────────────────────────────────────
+  // InnerTube network client
 
   async function ytmPost(endpoint, body, apiFetch) {
     const url = `${YTM_BASE}/${endpoint}?key=${YTM_KEY}&prettyPrint=false`;
@@ -493,10 +499,9 @@
     throw new Error(`All instances failed:\n${errs.join('\n')}`);
   }
 
-  // ─── YTMusic Data Parsers ─────────────────────────────────────────────────────
+  // Parsers
 
-  // Walk every key of a raw API response object and collect all section-like
-  // renderers recursively — this makes parsing immune to nesting changes.
+  // Recursively collect section renderers to handle nesting changes.
   function collectSections(obj, depth = 0, out = []) {
     if (!obj || typeof obj !== 'object' || depth > 12) return out;
     if (Array.isArray(obj)) { obj.forEach(el => collectSections(el, depth + 1, out)); return out; }
@@ -533,7 +538,6 @@
       return out;
     }
 
-    // Recurse into child keys
     for (const key of Object.keys(obj)) {
       if (key === '_raw') continue;
       collectSections(obj[key], depth + 1, out);
@@ -589,20 +593,17 @@
   function parseMusicItem(item) {
     if (!item) return null;
 
-    // --- musicTwoRowItemRenderer (cards: albums, artists, playlists) ---
     const twoRow = item.musicTwoRowItemRenderer;
     if (twoRow) {
       const title = getText(twoRow.title);
       if (!title) return null;
 
-      // Thumbnail: thumbnailRenderer is the most common path in WEB_REMIX
       const thumbThumbnails =
         twoRow.thumbnailRenderer?.musicThumbnailRenderer?.thumbnail?.thumbnails ||
         twoRow.thumbnail?.musicThumbnailRenderer?.thumbnail?.thumbnails ||
         twoRow.thumbnailRenderer?.croppedSquareThumbnailRenderer?.thumbnail?.thumbnails;
       const thumb = bestThumb(thumbThumbnails);
 
-      // Navigation: watch (song), watchPlaylist (radio), or browse (artist/album/playlist)
       const nav = twoRow.navigationEndpoint;
       const watchNav      = nav?.watchEndpoint;
       const watchPlNav    = nav?.watchPlaylistEndpoint;
@@ -616,7 +617,6 @@
 
       const subtitle = getText(twoRow.subtitle);
 
-      // Duration: check subtitle runs or string for time format (e.g. "3:45")
       let duration = 0;
       const subRuns = twoRow.subtitle?.runs || [];
       for (const r of subRuns) {
@@ -630,7 +630,6 @@
 
       const kind = classifyMusicItem(item, { subtitle, pageType });
 
-      // For songs embedded in a carousel (they have a watchEndpoint in a menu or the item itself)
       if (videoId) {
         let cardArtist = '';
         for (const r of subRuns) {
@@ -673,7 +672,6 @@
       };
     }
 
-    // --- musicResponsiveListItemRenderer (track rows in search/album/playlist) ---
     const listItem = item.musicResponsiveListItemRenderer;
     if (listItem) {
       const cols  = listItem.flexColumns || [];
@@ -685,7 +683,6 @@
       let title = getText(col0);
       if (!title) return null;
 
-      // videoId — several possible locations, try all
       const overlayEndpoint =
         listItem.overlay?.musicItemThumbnailOverlayRenderer?.content
           ?.musicPlayButtonRenderer?.playNavigationEndpoint;
@@ -696,7 +693,6 @@
         overlayEndpoint?.watchEndpoint?.videoId ||
         col0Run0Nav?.watchEndpoint?.videoId;
 
-      // browseId from listItem.navigationEndpoint or col0
       const navEndpoint = listItem.navigationEndpoint || col0Run0Nav;
       const browseId = navEndpoint?.browseEndpoint?.browseId || col0Run0Nav?.browseEndpoint?.browseId;
       const pageType = navEndpoint?.browseEndpoint
@@ -706,13 +702,11 @@
                          ?.browseEndpointContextSupportedConfigs
                          ?.browseEndpointContextMusicConfig?.pageType;
 
-      // Thumbnail
       const thumb = bestThumb(
         listItem.thumbnail?.musicThumbnailRenderer?.thumbnail?.thumbnails ||
         listItem.thumbnail?.croppedSquareThumbnailRenderer?.thumbnail?.thumbnails
       ) || (videoId ? ytThumb(videoId, 'hqdefault') : null);
 
-      // Duration from fixedColumns, lengthText, or runs
       let duration = parseDurationText(
         getText(listItem.fixedColumns?.[0]?.musicResponsiveListItemFixedColumnRenderer?.text)
       );
@@ -795,12 +789,10 @@
         }
       }
 
-      // Clean title and artist
       const cleaned = cleanTitleAndArtist(title, artist, isVerifiedArtist ? 'MUSIC_PAGE_TYPE_ARTIST' : (pageType || 'MUSIC_PAGE_TYPE_USER_CHANNEL'), !!videoId);
       title = cleaned.title;
       artist = cleaned.artist;
 
-      // Explicit badge
       const isExplicit = !!(listItem.badges?.some(b =>
         b.musicInlineBadgeRenderer?.icon?.iconType === 'MUSIC_EXPLICIT_BADGE'
       ));
@@ -830,7 +822,7 @@
     return null;
   }
 
-  // ─── YouTube Music API ────────────────────────────────────────────────────────
+  // YouTube Music API
 
   const API = {
 
@@ -852,6 +844,21 @@
 
     async getHome(apiFetch) {
       const data = await ytmPost('browse', { browseId: 'FEmusic_home' }, apiFetch);
+      return parseBrowse(data);
+    },
+
+    async getMoodCategory(params, apiFetch) {
+      const data = await ytmPost('browse', {
+        browseId: 'FEmusic_moods_and_genres_category',
+        params,
+      }, apiFetch);
+      return parseBrowse(data);
+    },
+
+    async getNewReleases(apiFetch) {
+      const data = await ytmPost('browse', {
+        browseId: 'FEmusic_new_releases',
+      }, apiFetch);
       return parseBrowse(data);
     },
 
@@ -1044,19 +1051,16 @@
       }
     }
 
-    // Top Result Hero Resolution (Option A: Prioritize official studio song)
+    // Promote top studio song to hero result when original hero is a video
     if (rawHeroCard) {
       const isCardArtist = rawHeroCard.item.pageType?.includes('ARTIST') || rawHeroCard.item.browseId?.startsWith('UC');
       const isCardAlbum = rawHeroCard.item.pageType?.includes('ALBUM') || rawHeroCard.item.browseId?.startsWith('MPRE');
 
       if (!isCardArtist && !isCardAlbum && rawHeroCard.item.isVideo && officialSongs.length > 0) {
-        // Promote top official studio song to Top Result Hero
         const promotedSong = officialSongs[0];
-        // Move original video hero item to videos array if not already present
         if (!videos.some(v => v.videoId === rawHeroCard.item.videoId)) {
           videos.unshift(rawHeroCard.item);
         }
-        // Move any card items that were videos to videos array
         for (const it of rawHeroCard.items) {
           if (it.isVideo && !videos.some(v => v.videoId === it.videoId)) {
             videos.push(it);
@@ -1093,7 +1097,12 @@
   }
 
   function parseBrowse(data) {
-    return collectSections(data);
+    const raw = collectSections(data);
+    return raw.filter(sec => {
+      const title = (sec.title || '').toLowerCase();
+      if (title.includes('community playlist') || title.includes('trending community')) return false;
+      return true;
+    });
   }
 
   function findHeaderRenderer(data) {
@@ -1173,7 +1182,6 @@
       data?.microformat?.microformatDataRenderer?.thumbnail?.thumbnails
     );
 
-    // Collect tracks via generic section collector
     const sections = collectSections(data);
     const trackSection = sections.find(s => s.items.some(i => i.videoId));
     const tracks = (trackSection?.items || []).map((p, idx) => {
@@ -1203,7 +1211,6 @@
       header?.thumbnail?.croppedSquareThumbnailRenderer?.thumbnail?.thumbnails ||
       header?.thumbnail?.musicThumbnailRenderer?.thumbnail?.thumbnails
     );
-    // Use generic collector for tracks
     const sections = collectSections(data);
     const trackSection = sections.find(s => s.items.some(i => i.videoId));
     const tracks = (trackSection?.items || []).map(p => {
@@ -1247,14 +1254,14 @@
     }).filter(Boolean);
   }
 
-  // ─── Stream Resolution ────────────────────────────────────────────────────────
+  // Stream resolution
 
   const videoDurationCache = new Map();
 
   async function resolveStream(videoId, apiFetch) {
     const INNERTUBE_BASE = 'https://www.youtube.com/youtubei/v1';
 
-    // 1. InnerTube player (un-ciphered clients)
+    // InnerTube un-ciphered clients
     let rawStreamUrl = null;
     for (const ctx of STREAM_CONTEXTS) {
       try {
@@ -1293,7 +1300,7 @@
       }
     }
 
-    // 2. Piped (fallback if InnerTube failed)
+    // Piped fallback
     if (!rawStreamUrl) {
       try {
         const { data } = await tryInstances(PIPED_INSTANCES, base => `${base}/streams/${videoId}`, apiFetch);
@@ -1303,7 +1310,7 @@
       } catch (e) { console.warn(`${PLUGIN_LABEL} Piped:`, e.message); }
     }
 
-    // 3. Invidious (fallback)
+    // Invidious fallback
     if (!rawStreamUrl) {
       try {
         const { data } = await tryInstances(INVIDIOUS_INSTANCES, base => `${base}/api/v1/videos/${videoId}?fields=adaptiveFormats`, apiFetch);
@@ -1320,7 +1327,7 @@
   function pickBestAudio(formats) {
     if (!formats || !formats.length) return null;
 
-    // 1. Prefer pure audio streams (no video tracks)
+    // Prefer dedicated audio streams
     const audio = formats.filter(f => f.url && f.mimeType?.startsWith('audio/') && !f.width && !f.height);
     if (audio.length) {
       const m4a  = audio.filter(f => f.mimeType.includes('mp4') || f.mimeType.includes('m4a'));
@@ -1329,15 +1336,14 @@
       return pool[0]?.url || null;
     }
 
-    // 2. Fall back to muxed MP4 formats (e.g. itag 18: standard MP4 container with AAC audio)
-    // Audion's media player plays the audio track of MP4 containers directly
+    // Fall back to muxed MP4 containers (Audion plays audio directly)
     const muxed = formats.filter(f => f.url && (f.mimeType?.includes('video/mp4') || f.mimeType?.includes('audio')));
     if (muxed.length) {
       muxed.sort((a, b) => (b.audioQuality === 'AUDIO_QUALITY_MEDIUM' ? 1 : 0) - (a.audioQuality === 'AUDIO_QUALITY_MEDIUM' ? 1 : 0));
       return muxed[0]?.url || null;
     }
 
-    // 3. Any plain URL format
+    // Any available plain URL
     const any = formats.filter(f => f.url);
     return any[0]?.url || null;
   }
@@ -1359,17 +1365,17 @@
     return pool[0]?.url || null;
   }
 
-  // ─── Styles ───────────────────────────────────────────────────────────────────
+  // Styles
 
   const CSS = `
-    /* ═══ Anti-Slop Design System Tokens ═══ */
+    /* Design Tokens */
     :root {
       --ytm-red: #ff0033;
       --ytm-red-hover: #e6002e;
       --ytm-red-subtle: rgba(255, 0, 51, 0.12);
     }
 
-    /* ═══ Root container ═══ */
+    /* Root container */
     #ytm-overlay {
       position: fixed; inset: 0; z-index: 10000;
       background: rgba(0, 0, 0, 0.65);
@@ -1410,7 +1416,7 @@
       #ytm-panel.open { transform: none !important; }
     }
 
-    /* ═══ Header ═══ */
+    /* Header */
     .ytm-header {
       display: flex; align-items: center; gap: 10px;
       padding: 12px 18px; border-bottom: 1px solid var(--border-color, #333333);
@@ -1431,7 +1437,7 @@
     }
     .ytm-icon-btn:hover { background: var(--bg-highlight, #3e3e3e); color: var(--text-primary, #ffffff); }
 
-    /* ═══ Tabs nav ═══ */
+    /* Tabs nav */
     .ytm-tabs {
       display: flex; gap: 4px; padding: 0 16px;
       border-bottom: 1px solid var(--border-color, #333333);
@@ -1451,7 +1457,7 @@
     .ytm-tab.active { color: var(--text-primary, #ffffff); border-bottom-color: var(--ytm-red, #ff0033); }
     .ytm-tab svg { flex-shrink: 0; }
 
-    /* ═══ Search bar ═══ */
+    /* Search bar */
     .ytm-search-row {
       display: flex; gap: 8px; padding: 12px 16px; flex-shrink: 0;
       border-bottom: 1px solid var(--border-color, #333333);
@@ -1488,7 +1494,155 @@
     .ytm-chip:hover { border-color: var(--text-secondary, #c8c8c8); color: var(--text-primary, #ffffff); }
     .ytm-chip.active { background: var(--ytm-red, #ff0033); border-color: var(--ytm-red, #ff0033); color: #ffffff; font-weight: 600; }
 
-    /* ═══ Content area ═══ */
+    /* Home vibe chips */
+    .ytm-vibe-row {
+      display: flex; gap: 8px; padding: 10px 16px; flex-shrink: 0;
+      overflow-x: auto; scrollbar-width: none; background: var(--bg-elevated, #181818);
+      border-bottom: 1px solid var(--border-color, #2a2a2a);
+    }
+    .ytm-vibe-row::-webkit-scrollbar { display: none; }
+    .ytm-vibe-pill {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 6px 14px; border-radius: var(--radius-full, 9999px);
+      font-size: var(--font-size-xs, 12px); font-weight: 500;
+      cursor: pointer; white-space: nowrap; transition: all var(--transition-fast, 150ms ease);
+      border: 1px solid var(--border-color, #404040);
+      background: rgba(255, 255, 255, 0.05); color: var(--text-secondary, #c8c8c8);
+    }
+    .ytm-vibe-pill:hover { border-color: var(--text-secondary, #c8c8c8); color: var(--text-primary, #ffffff); background: rgba(255, 255, 255, 0.09); }
+    .ytm-vibe-pill.active { background: var(--ytm-red, #ff0033); border-color: var(--ytm-red, #ff0033); color: #ffffff; font-weight: 600; }
+
+    /* Shortcuts grid */
+    .ytm-shortcuts-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 10px;
+      padding: 16px 16px 8px;
+    }
+    .ytm-shortcut-card {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      background: var(--bg-surface, #282828);
+      border: 1px solid var(--border-color, #383838);
+      border-radius: var(--radius-md, 8px);
+      padding: 10px 14px;
+      cursor: pointer;
+      position: relative;
+      overflow: hidden;
+      transition: background var(--transition-fast, 150ms ease), border-color var(--transition-fast, 150ms ease), transform var(--transition-fast, 150ms ease);
+    }
+    .ytm-shortcut-card:hover {
+      background: var(--bg-elevated, #333333);
+      border-color: rgba(255, 255, 255, 0.2);
+      transform: translateY(-1px);
+    }
+    .ytm-shortcut-thumb {
+      width: 48px;
+      height: 48px;
+      border-radius: var(--radius-sm, 6px);
+      object-fit: cover;
+      flex-shrink: 0;
+      background: var(--bg-base, #1c1c1c);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+      color: #fff;
+    }
+    .ytm-shortcut-thumb.circle {
+      border-radius: 50%;
+    }
+    .ytm-shortcut-info {
+      flex: 1;
+      min-width: 0;
+    }
+    .ytm-shortcut-title {
+      font-size: var(--font-size-sm, 13px);
+      font-weight: 600;
+      color: var(--text-primary, #ffffff);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .ytm-shortcut-sub {
+      font-size: 11px;
+      color: var(--text-subdued, #8e8e8e);
+      margin-top: 2px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .ytm-shortcut-play-btn {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      background: var(--ytm-red, #ff0033);
+      color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: none;
+      cursor: pointer;
+      flex-shrink: 0;
+      opacity: 0;
+      transform: scale(0.85);
+      transition: all var(--transition-fast, 150ms ease);
+    }
+    .ytm-shortcut-card:hover .ytm-shortcut-play-btn,
+    .ytm-shortcut-card:focus-within .ytm-shortcut-play-btn {
+      opacity: 1;
+      transform: scale(1);
+    }
+    .ytm-shortcut-play-btn:hover {
+      background: var(--ytm-red-hover, #e6002e);
+      transform: scale(1.08);
+    }
+
+    /* Vibe tiles */
+    .ytm-vibe-tiles-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+      gap: 12px;
+      padding: 0 16px 16px;
+    }
+    .ytm-vibe-tile {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      justify-content: flex-end;
+      height: 76px;
+      padding: 12px;
+      border-radius: var(--radius-md, 8px);
+      cursor: pointer;
+      font-weight: 700;
+      font-size: 13px;
+      color: #ffffff;
+      transition: transform var(--transition-fast, 150ms ease), filter var(--transition-fast, 150ms ease);
+      position: relative;
+      overflow: hidden;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+    .ytm-vibe-tile:hover {
+      transform: translateY(-2px);
+      filter: brightness(1.1);
+    }
+    .ytm-vibe-tile-title {
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: -0.1px;
+    }
+    .ytm-vibe-tile-desc {
+      font-size: 11px;
+      font-weight: 500;
+      color: rgba(255, 255, 255, 0.7);
+      margin-top: 2px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* Content */
     .ytm-content {
       flex: 1; overflow-y: auto; overflow-x: hidden;
       background: var(--bg-base, #121212);
@@ -1496,14 +1650,14 @@
     .ytm-content::-webkit-scrollbar { width: 6px; }
     .ytm-content::-webkit-scrollbar-thumb { background: var(--border-color, #404040); border-radius: 3px; }
 
-    /* ═══ Section / Shelf ═══ */
+    /* Sections */
     .ytm-section { padding: 18px 16px 8px; }
     .ytm-section-title {
       font-size: var(--font-size-base, 14px); font-weight: 700; color: var(--text-primary, #ffffff);
       margin: 0 0 12px; letter-spacing: -0.1px;
     }
 
-    /* ═══ Horizontal card row ═══ */
+    /* Cards */
     .ytm-card-row {
       display: flex; gap: 14px; overflow-x: auto; padding-bottom: 12px;
       scrollbar-width: none;
@@ -1541,7 +1695,7 @@
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
 
-    /* ═══ Track list rows ═══ */
+    /* Track list */
     .ytm-track-list { padding: 4px 12px 24px; }
     .ytm-track {
       display: grid; grid-template-columns: 44px 1fr auto auto;
@@ -1597,7 +1751,7 @@
     .ytm-explicit { font-size: 9px; font-weight: 800; background: var(--bg-highlight, #3e3e3e); color: #fff; padding: 1px 4px; border-radius: 2px; margin-left: 6px; }
     .ytm-video-badge { font-size: 9px; font-weight: 700; background: rgba(255, 255, 255, 0.12); color: var(--text-secondary, #aaa); padding: 1px 4px; border-radius: 2px; margin-left: 6px; text-transform: uppercase; letter-spacing: 0.3px; }
 
-    /* ═══ Top Result Card (All search) ═══ */
+    /* Top Result hero */
     .ytm-top-result-section { padding-bottom: 4px; }
     .ytm-top-result-card {
       display: flex; align-items: center; justify-content: space-between;
@@ -1635,7 +1789,7 @@
       background: var(--bg-highlight, #3e3e3e); color: var(--text-primary, #ffffff); margin-top: 6px;
     }
 
-    /* ═══ Action buttons (Play All / Like Album / Like Playlist) ═══ */
+    /* Action buttons */
     .ytm-action-row {
       display: flex; align-items: center; gap: 10px; padding: 0 16px 16px;
     }
@@ -1660,7 +1814,7 @@
       color: var(--ytm-red, #ff0033); border-color: var(--ytm-red, #ff0033); background: var(--ytm-red-subtle, rgba(255, 0, 51, 0.12));
     }
 
-    /* ═══ Interactive entity links ═══ */
+    /* Entity links */
     .ytm-link {
       color: var(--text-secondary, #c8c8c8);
       cursor: pointer;
@@ -1690,18 +1844,18 @@
       opacity: 0;
     }
 
-    /* ═══ Skeleton ═══ */
+    /* Skeleton */
     .ytm-skel { background: var(--bg-surface, #282828); border-radius: var(--radius-sm, 4px); display: block; animation: ytm-pulse 1.4s infinite; }
     @keyframes ytm-pulse { 0%, 100% { opacity: 0.35 } 50% { opacity: 0.65 } }
 
-    /* ═══ Empty / Error ═══ */
+    /* Empty state */
     .ytm-empty {
       display: flex; flex-direction: column; align-items: center; justify-content: center;
       padding: 60px 24px; gap: 12px; color: var(--text-subdued, #8e8e8e); font-size: 13px; text-align: center;
     }
-    .ytm-empty-icon { font-size: 32px; }
+    .ytm-empty-icon { font-size: 24px; color: var(--text-subdued, #8e8e8e); display: flex; align-items: center; justify-content: center; }
 
-    /* ═══ Toast ═══ */
+    /* Toast */
     #ytm-toast {
       position: fixed; bottom: 90px; left: 50%; transform: translateX(-50%);
       background: var(--bg-surface, #282828); color: var(--text-primary, #ffffff);
@@ -1713,7 +1867,7 @@
     }
     #ytm-toast.show { opacity: 1; }
 
-    /* ═══ Playerbar button ═══ */
+    /* Playerbar button */
     .ytm-pb-btn {
       display: inline-flex; align-items: center; gap: 8px;
       padding: 7px 14px; border-radius: var(--radius-full, 9999px);
@@ -1725,7 +1879,7 @@
     .ytm-pb-btn:hover { background: var(--bg-highlight, #3e3e3e); border-color: var(--ytm-red, #ff0033); }
     .ytm-pb-btn svg { color: var(--ytm-red, #ff0033); }
 
-    /* ═══ Artist / Album hero ═══ */
+    /* Artist/album hero */
     .ytm-hero {
       position: relative; height: 180px; overflow: hidden; flex-shrink: 0;
       display: flex; align-items: flex-end;
@@ -1742,7 +1896,7 @@
     }
     .ytm-play-all-btn:hover { background: var(--ytm-red-hover, #e6002e); }
 
-    /* ═══ Settings drawer ═══ */
+    /* Settings */
     #ytm-settings {
       position: absolute; inset: 0; background: var(--bg-elevated, #181818);
       border-radius: var(--radius-lg, 12px); z-index: 30; display: flex; flex-direction: column;
@@ -1782,7 +1936,7 @@
     .ytm-add-btn:hover { border-color: var(--ytm-red, #ff0033); color: #fff; }
     .ytm-divider { border: none; border-top: 1px solid var(--border-color, #333333); margin: 20px 0; }
 
-    /* ═══ Import Modal ═══ */
+    /* Import modal */
     #ytm-import-modal {
       position: absolute; inset: 0; background: var(--bg-elevated, #181818);
       border-radius: var(--radius-lg, 12px); z-index: 35; display: flex; flex-direction: column;
@@ -1847,7 +2001,7 @@
     .ytm-btn-danger:hover { background: #cf1030 !important; }
     .ytm-btn-sm { padding: 4px 10px !important; font-size: 11px !important; min-height: 26px !important; }
 
-    /* URL detected prompt card in search */
+    /* URL detected card */
     .ytm-url-detected-card {
       margin: 12px 18px; padding: 16px; background: var(--bg-surface, #242424);
       border: 1px solid var(--ytm-red, #ff0033); border-radius: var(--radius-md, 8px);
@@ -1858,12 +2012,12 @@
     .ytm-url-detected-desc { font-size: 12px; color: var(--text-secondary, #bbb); word-break: break-all; font-family: monospace; background: rgba(0,0,0,0.2); padding: 6px 10px; border-radius: 4px; }
     .ytm-url-detected-actions { display: flex; gap: 8px; margin-top: 4px; }
 
-    /* ═══ Misc ═══ */
+    /* Utilities */
     .hidden { display: none !important; }
     .ytm-badge-new { background: var(--ytm-red, #ff0033); color: #fff; font-size: 9px; font-weight: 800; padding: 1px 5px; border-radius: 3px; margin-left: 5px; }
   `;
 
-  // ─── Plugin Object ────────────────────────────────────────────────────────────
+  // Plugin object
 
   const YouTubeMusic = {
     api:        null,
@@ -1879,6 +2033,8 @@
     _currentTitle: 'YouTube Music',
     _searchFilter: 'songs', // default to 'songs' to prioritize studio music
     _activeTab: 'home',
+    _activeHomeVibe: 'for_you',
+    _recentPlayed: [],
     _playingVideoId: null,
     _searchCache: new MemCache(5 * 60 * 1000),   // 5 min
     _browseCache:  new MemCache(10 * 60 * 1000),  // 10 min
@@ -1893,12 +2049,13 @@
       preferStudioAudio: true, // auto-switch videos to studio audio tracks
     },
 
-    // ─── Init ──────────────────────────────────────────────────────────────────
+    // Init
 
     async init(api) {
       this.api     = api;
 
       await this._loadConfig();
+      await this._loadPlayHistory();
       await this._fetchLibraryIds();
       this._injectStyles();
       this._buildDOM();
@@ -1973,7 +2130,121 @@
       } catch (e) { /* ignore */ }
     },
 
-    // ─── Cross-plugin search source ────────────────────────────────────────────
+    // Play history & personalization helpers
+
+    async _loadPlayHistory() {
+      try {
+        const raw = await this.api.storage?.get?.('ytm_recent_played');
+        if (raw) {
+          const list = JSON.parse(raw);
+          if (Array.isArray(list)) {
+            this._recentPlayed = list;
+          }
+        }
+      } catch (e) { /* ignore */ }
+    },
+
+    async _recordPlayHistory(track) {
+      if (!track || !track.videoId) return;
+      try {
+        const item = {
+          videoId: track.videoId,
+          title: track.title,
+          artist: track.artist || '',
+          album: track.album || '',
+          thumb: track.thumb || ytThumb(track.videoId),
+          duration: track.duration || 0,
+          isSong: true,
+          playedAt: Date.now(),
+        };
+        this._recentPlayed = [
+          item,
+          ...this._recentPlayed.filter(t => t.videoId !== track.videoId)
+        ].slice(0, 20);
+
+        await this.api.storage?.set?.('ytm_recent_played', JSON.stringify(this._recentPlayed));
+      } catch (e) { /* ignore */ }
+    },
+
+    async _analyzeLibrary() {
+      try {
+        const tracks = await this.api.library?.getTracks?.() || [];
+        if (!tracks.length) return { topArtists: [], totalTracks: 0, tracks: [] };
+
+        const artistCounts = new Map();
+        for (const t of tracks) {
+          const a = (t.artist || '').trim();
+          if (!a || /^(unknown artist|various artists|various)$/i.test(a)) continue;
+          artistCounts.set(a, (artistCounts.get(a) || 0) + 1);
+        }
+
+        const sortedArtists = [...artistCounts.entries()]
+          .sort((a, b) => b[1] - a[1])
+          .map(([name, count]) => ({ name, count }));
+
+        return {
+          topArtists: sortedArtists.slice(0, 6),
+          totalTracks: tracks.length,
+          tracks,
+        };
+      } catch (e) {
+        return { topArtists: [], totalTracks: 0, tracks: [] };
+      }
+    },
+
+    async _shuffleLibraryTracks() {
+      try {
+        const tracks = await this.api.library?.getTracks?.() || [];
+        if (!tracks.length) {
+          this._toast('Your Audion library is empty. Save some tracks first!');
+          return;
+        }
+
+        const shuffled = [...tracks];
+        for (let i = shuffled.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+        }
+
+        if (typeof this.api.player?.playQueue === 'function') {
+          await this.api.player.playQueue(shuffled, 0, {
+            type: 'library_shuffle',
+            name: 'Shuffle Library',
+          });
+          this._toast(`Shuffling ${shuffled.length} tracks from your library`);
+        } else if (typeof this.api.player?.setTrack === 'function') {
+          await this.api.player.setTrack(shuffled[0]);
+          this._toast(`Playing "${shuffled[0].title}"`);
+        }
+      } catch (e) {
+        console.error(`${PLUGIN_LABEL} shuffle library error:`, e);
+        this._toast('Failed to shuffle library');
+      }
+    },
+
+    async _searchAndOpenArtist(artistName) {
+      if (!artistName) return;
+      this._setSkeleton();
+      try {
+        const res = await API.search(artistName, (u, o) => this._apiFetch(u, o), 'artists');
+        const artistItem = res?.find(s => s.items?.length)?.items?.[0] || res?.[0]?.items?.[0];
+        if (artistItem?.browseId) {
+          this._pushNav(artistItem.title || artistName, () => this._loadArtist(artistItem.browseId), null);
+        } else {
+          this._switchTab('search');
+          const input = document.getElementById('ytm-search-input');
+          if (input) input.value = artistName;
+          this._performSearch(artistName);
+        }
+      } catch (_) {
+        this._switchTab('search');
+        const input = document.getElementById('ytm-search-input');
+        if (input) input.value = artistName;
+        this._performSearch(artistName);
+      }
+    },
+
+    // Cross-plugin search source
 
     async _crossPluginSearch(query, onResult) {
       try {
@@ -1993,7 +2264,7 @@
       }
     },
 
-    // ─── Styles ────────────────────────────────────────────────────────────────
+    // Styles
 
     _injectStyles() {
       if (document.getElementById('ytm-styles')) return;
@@ -2003,32 +2274,28 @@
       document.head.appendChild(s);
     },
 
-    // ─── DOM Construction ──────────────────────────────────────────────────────
+    // DOM construction
 
     _buildDOM() {
       if (document.getElementById('ytm-panel')) return;
 
-      // Overlay
       const ov = document.createElement('div');
       ov.id = 'ytm-overlay';
       ov.onclick = () => this.close();
       document.body.appendChild(ov);
 
-      // Toast
       const toast = document.createElement('div');
       toast.id = 'ytm-toast';
       toast.setAttribute('role', 'status');
       toast.setAttribute('aria-live', 'polite');
       document.body.appendChild(toast);
 
-      // Panel
       const panel = document.createElement('div');
       panel.id = 'ytm-panel';
       panel.setAttribute('role', 'dialog');
       panel.setAttribute('aria-label', 'YouTube Music');
       panel.setAttribute('aria-modal', 'true');
       panel.innerHTML = `
-        <!-- Settings drawer -->
         <div id="ytm-settings" role="region" aria-label="Settings">
           <div class="ytm-header">
             <div class="ytm-title">Settings</div>
@@ -2037,7 +2304,6 @@
           <div class="ytm-settings-body" id="ytm-settings-body"></div>
         </div>
 
-        <!-- Import drawer -->
         <div id="ytm-import-modal" role="region" aria-label="Import from URL">
           <div class="ytm-header">
             <div class="ytm-logo" aria-hidden="true">${ICON.import}</div>
@@ -2047,7 +2313,6 @@
           <div class="ytm-import-body" id="ytm-import-body"></div>
         </div>
 
-        <!-- Header -->
         <div class="ytm-header">
           <button id="ytm-back-btn" class="ytm-icon-btn hidden" title="Back" aria-label="Back">${ICON.back}</button>
           <div class="ytm-logo" aria-hidden="true">${ICON.ytmusic}</div>
@@ -2057,14 +2322,22 @@
           <button id="ytm-close-btn" class="ytm-icon-btn" title="Close" aria-label="Close dialog">${ICON.close}</button>
         </div>
 
-        <!-- Tabs -->
         <div class="ytm-tabs" id="ytm-tabs" role="tablist" aria-label="Browse sections">
           <button class="ytm-tab active" data-tab="home" role="tab" aria-selected="true">${ICON.home} Home</button>
           <button class="ytm-tab" data-tab="trending" role="tab" aria-selected="false">${ICON.trending} Trending</button>
           <button class="ytm-tab" data-tab="search" role="tab" aria-selected="false">${ICON.search} Search</button>
         </div>
 
-        <!-- Search bar (hidden on non-search tabs) -->
+        <div class="ytm-vibe-row" id="ytm-home-vibe-row" role="group" aria-label="Home vibes">
+          <button class="ytm-vibe-pill active" data-vibe="for_you" aria-pressed="true">For You</button>
+          <button class="ytm-vibe-pill" data-vibe="chill" aria-pressed="false">Chill</button>
+          <button class="ytm-vibe-pill" data-vibe="focus" aria-pressed="false">Focus</button>
+          <button class="ytm-vibe-pill" data-vibe="energize" aria-pressed="false">Workout</button>
+          <button class="ytm-vibe-pill" data-vibe="feel_good" aria-pressed="false">Feel Good</button>
+          <button class="ytm-vibe-pill" data-vibe="commute" aria-pressed="false">Commute</button>
+          <button class="ytm-vibe-pill" data-vibe="party" aria-pressed="false">Party</button>
+        </div>
+
         <div class="ytm-search-row hidden" id="ytm-search-row">
           <div class="ytm-search-wrap">
             <div class="ytm-search-icon" aria-hidden="true">${ICON.search}</div>
@@ -2079,7 +2352,6 @@
           <button class="ytm-chip" data-filter="playlists" aria-pressed="false">${ICON.list} Playlists</button>
         </div>
 
-        <!-- Content -->
         <div class="ytm-content" id="ytm-content" role="region" aria-label="Content"></div>
       `;
       document.body.appendChild(panel);
@@ -2132,7 +2404,6 @@
         this._renderInstanceList('ytm-inv-list', this.config.invidiousInstances);
       };
       document.getElementById('ytm-settings-save').onclick = async () => {
-        // Collect values from inputs
         this.config.preferStudioAudio = document.getElementById('ytm-prefer-studio')?.checked ?? true;
         this.config.pipedInstances = [...document.querySelectorAll('#ytm-piped-list .ytm-text-input')].map(el => el.value.trim()).filter(Boolean);
         this.config.invidiousInstances = [...document.querySelectorAll('#ytm-inv-list .ytm-text-input')].map(el => el.value.trim()).filter(Boolean);
@@ -2142,7 +2413,7 @@
       };
     },
 
-    // ─── Import Dialog ──────────────────────────────────────────────────────────
+    // Import dialog
 
     _openImportModal(prefillUrl = '') {
       this._buildImportBody();
@@ -2189,7 +2460,6 @@
         <div id="ytm-import-content" class="ytm-import-content"></div>
       `;
 
-      // Paste button
       document.getElementById('ytm-import-paste-btn').onclick = async () => {
         try {
           if (navigator.clipboard?.readText) {
@@ -2209,12 +2479,10 @@
         }
       };
 
-      // Fetch button
       document.getElementById('ytm-import-fetch-btn').onclick = () => {
         this._fetchImportUrl();
       };
 
-      // Enter key in url input
       document.getElementById('ytm-import-url-input')?.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') {
           e.preventDefault();
@@ -2230,7 +2498,7 @@
       if (!content) return;
 
       if (!val) {
-        content.innerHTML = `<div class="ytm-empty" style="padding:24px 0;"><div class="ytm-empty-icon">⚠️</div><div class="ytm-empty-text">Please enter a YouTube link or ID.</div></div>`;
+        content.innerHTML = `<div class="ytm-empty" style="padding:24px 0;"><div class="ytm-empty-icon">${ICON.alert}</div><div class="ytm-empty-text">Please enter a YouTube link or ID.</div></div>`;
         return;
       }
 
@@ -2238,7 +2506,7 @@
       if (!parsed) {
         content.innerHTML = `
           <div class="ytm-empty" style="padding:24px 0;">
-            <div class="ytm-empty-icon">⚠️</div>
+            <div class="ytm-empty-icon">${ICON.alert}</div>
             <div class="ytm-empty-text">Unrecognized link format.</div>
             <p class="ytm-field-hint" style="text-align:center; margin-top:8px;">
               Please provide a valid YouTube Music or YouTube URL (e.g. <code>https://music.youtube.com/playlist?list=...</code>).
@@ -2287,7 +2555,7 @@
         console.error(`${PLUGIN_LABEL} fetch import error:`, err);
         content.innerHTML = `
           <div class="ytm-empty" style="padding:24px 0;">
-            <div class="ytm-empty-icon">⚠️</div>
+            <div class="ytm-empty-icon">${ICON.alert}</div>
             <div class="ytm-empty-text">Failed to fetch content: ${esc(err.message)}</div>
           </div>
         `;
@@ -2298,7 +2566,6 @@
       const content = document.getElementById('ytm-import-content');
       if (!content || !data) return;
 
-      // Handle single track
       if (data.type === 'track') {
         const t = data.track;
         const durStr = t.duration ? fmtDuration(t.duration) : '';
@@ -2341,12 +2608,11 @@
         return;
       }
 
-      // Handle playlist or album
       const tracks = data.tracks || [];
       if (!tracks.length) {
         content.innerHTML = `
           <div class="ytm-empty" style="padding:24px 0;">
-            <div class="ytm-empty-icon">🎵</div>
+            <div class="ytm-empty-icon">${ICON.music}</div>
             <div class="ytm-empty-text">No playable tracks found in this ${data.type || 'playlist'}.</div>
           </div>
         `;
@@ -2391,7 +2657,6 @@
             </div>
           </div>
 
-          <!-- Progress bar -->
           <div id="ytm-import-progress-wrap" class="ytm-import-progress-wrap hidden">
             <div class="ytm-progress-bar-bg">
               <div id="ytm-import-progress-bar" class="ytm-progress-bar-fill" style="width: 0%;"></div>
@@ -2402,7 +2667,6 @@
             </div>
           </div>
 
-          <!-- Track checklist -->
           <div class="ytm-import-track-list" id="ytm-import-track-list">
             ${tracks.map((t, idx) => {
               const rowThumb = t.thumb || (t.videoId ? ytThumb(t.videoId, 'hqdefault') : '');
@@ -2424,7 +2688,6 @@
         </div>
       `;
 
-      // Select all toggle
       const selectAllEl = document.getElementById('ytm-import-select-all');
       selectAllEl.onchange = (e) => {
         const checked = e.target.checked;
@@ -2438,7 +2701,6 @@
         this._updateSelectedCount(tracks.length);
       };
 
-      // Individual checkboxes
       content.querySelectorAll('.ytm-import-track-chk').forEach(c => {
         c.onchange = (e) => {
           const idx = parseInt(c.dataset.idx, 10);
@@ -2449,7 +2711,6 @@
         };
       });
 
-      // Fix Metadata button
       const fixBtn = document.getElementById('ytm-import-fix-btn');
       if (fixBtn) {
         fixBtn.onclick = () => {
@@ -2457,7 +2718,6 @@
         };
       }
 
-      // Play Now button
       document.getElementById('ytm-import-play-btn').onclick = () => {
         const selected = tracks.filter((_, i) => this._selectedTrackIndices.has(i));
         if (!selected.length) {
@@ -2468,7 +2728,6 @@
         this._closeImportModal();
       };
 
-      // Import to Library button
       document.getElementById('ytm-import-save-btn').onclick = () => {
         this._startImport(data);
       };
@@ -2544,13 +2803,11 @@
           if (progressBar) progressBar.style.width = `${pct}%`;
           if (progressText) progressText.textContent = `Fixing ${i + 1}/${total}: "${t.title}"…`;
 
-          // 1. First run algorithmic cleaner
           const localCleaned = cleanTitleAndArtist(t.title, t.artist, 'MUSIC_PAGE_TYPE_USER_CHANNEL', true);
           let targetTitle = localCleaned.title;
           let targetArtist = localCleaned.artist;
           let targetCover = t.thumb || (t.videoId ? ytThumb(t.videoId, 'hqdefault') : null);
 
-          // 2. Query canonical metadata fetcher (iTunes / Deezer)
           let canonical = null;
           try {
             canonical = await fetchCanonicalMetadata(targetTitle, targetArtist, (u, o) => this._apiFetch(u, o));
@@ -2563,12 +2820,10 @@
             if (canonical.thumb) targetCover = canonical.thumb;
           }
 
-          // Update track data object
           t.title = targetTitle;
           t.artist = targetArtist;
           if (targetCover) t.thumb = targetCover;
 
-          // Update DOM row in tracklist
           if (trackListEl) {
             const row = trackListEl.querySelector(`.ytm-import-track-row[data-idx="${idx}"]`);
             if (row) {
@@ -2588,7 +2843,6 @@
             }
           }
 
-          // If first track has an upgraded cover, update playlist hero thumb
           if (idx === 0 && targetCover) {
             const heroThumb = document.querySelector('.ytm-import-thumb');
             if (heroThumb) heroThumb.src = targetCover;
@@ -2782,14 +3036,12 @@
       });
     },
 
-    // ─── Events ────────────────────────────────────────────────────────────────
+    // Events
 
     _wireEvents() {
-      // Header buttons
       document.getElementById('ytm-close-btn').onclick = () => this.close();
       document.getElementById('ytm-back-btn').onclick  = () => this._goBack();
 
-      // Settings
       document.getElementById('ytm-settings-open').onclick = () => {
         this._buildSettingsBody();
         document.getElementById('ytm-settings')?.classList.add('open');
@@ -2798,7 +3050,6 @@
         document.getElementById('ytm-settings')?.classList.remove('open');
       };
 
-      // Import modal
       document.getElementById('ytm-import-open').onclick = () => {
         this._openImportModal();
       };
@@ -2806,14 +3057,20 @@
         this._closeImportModal();
       };
 
-      // Tabs
       document.getElementById('ytm-tabs').onclick = (e) => {
         const btn = e.target.closest('[data-tab]');
         if (!btn) return;
         this._switchTab(btn.dataset.tab);
       };
 
-      // Filter chips
+      document.getElementById('ytm-home-vibe-row')?.addEventListener('click', (e) => {
+        const pill = e.target.closest('[data-vibe]');
+        if (!pill) return;
+        const vibe = pill.dataset.vibe;
+        if (vibe === this._activeHomeVibe) return;
+        this._setHomeVibe(vibe);
+      });
+
       document.getElementById('ytm-filter-row')?.addEventListener('click', (e) => {
         const chip = e.target.closest('[data-filter]');
         if (!chip) return;
@@ -2828,13 +3085,12 @@
         if (q) this._performSearch(q);
       });
 
-      // Search input
       const input = document.getElementById('ytm-search-input');
       input?.addEventListener('input', (e) => {
         const q = e.target.value.trim();
         this._currentQuery = q;
         clearTimeout(this._searchTimer);
-        if (!q) { this._setContent(this._emptyEl('🎵', 'Start typing to search…')); return; }
+        if (!q) { this._setContent(this._emptyEl(ICON.music, 'Start typing to search…')); return; }
 
         const urlInfo = parseYouTubeUrl(q);
         if (urlInfo) {
@@ -2856,7 +3112,7 @@
         }
       });
 
-      // ESC to close (close modals first)
+      // Escape key closes modals or panel
       document.addEventListener('keydown', (e) => {
         if (e.key === 'Escape' && this.isOpen) {
           const importModal = document.getElementById('ytm-import-modal');
@@ -2874,7 +3130,7 @@
       });
     },
 
-    // ─── Playerbar button ──────────────────────────────────────────────────────
+    // Playerbar button
 
     _buildPlayerbarButton() {
       if (document.getElementById('ytm-pb-btn')) return;
@@ -2886,11 +3142,10 @@
       if (this.api?.ui?.registerSlot) {
         this.api.ui.registerSlot('playerbar:menu', btn);
       }
-      // retry in case slot isn't ready yet
       setTimeout(() => this._buildPlayerbarButton(), 600);
     },
 
-    // ─── Open / Close ──────────────────────────────────────────────────────────
+    // Open / close
 
     open() {
       this.isOpen = true;
@@ -2908,7 +3163,7 @@
       document.getElementById('ytm-panel')?.classList.remove('open');
     },
 
-    // ─── Tab switching ─────────────────────────────────────────────────────────
+    // Tab switching
 
     _switchTab(tab) {
       if (this._activeTab === tab && this._navStack.length === 0) return;
@@ -2924,11 +3179,13 @@
 
       const searchRow   = document.getElementById('ytm-search-row');
       const filterRow   = document.getElementById('ytm-filter-row');
+      const vibeRow     = document.getElementById('ytm-home-vibe-row');
       const backBtn     = document.getElementById('ytm-back-btn');
       const panelTitle  = document.getElementById('ytm-panel-title');
 
       searchRow?.classList.toggle('hidden', tab !== 'search');
       filterRow?.classList.toggle('hidden', tab !== 'search');
+      vibeRow?.classList.toggle('hidden', tab !== 'home');
       backBtn?.classList.add('hidden');
 
       panelTitle.textContent = this._currentNavState.title;
@@ -2941,12 +3198,12 @@
       } else if (tab === 'search') {
         const q = document.getElementById('ytm-search-input')?.value.trim();
         if (q) this._performSearch(q);
-        else this._setContent(this._emptyEl('🔍', 'Search for songs, albums, artists, or playlists'));
+        else this._setContent(this._emptyEl(ICON.search, 'Search for songs, albums, artists, or playlists'));
         setTimeout(() => document.getElementById('ytm-search-input')?.focus(), 80);
       }
     },
 
-    // ─── Navigation stack ──────────────────────────────────────────────────────
+    // Navigation stack
 
     _pushNav(title, renderFn, data) {
       if (this._currentNavState) {
@@ -2955,6 +3212,7 @@
       document.getElementById('ytm-panel-title').textContent = title;
       document.getElementById('ytm-back-btn')?.classList.remove('hidden');
       document.querySelectorAll('.ytm-tab').forEach(t => t.classList.remove('active'));
+      document.getElementById('ytm-home-vibe-row')?.classList.add('hidden');
       document.getElementById('ytm-search-row')?.classList.add('hidden');
       document.getElementById('ytm-filter-row')?.classList.add('hidden');
       renderFn(data);
@@ -2969,6 +3227,7 @@
       if (prev.type === 'tab') {
         this._activeTab = prev.tab;
         this._currentNavState = prev;
+        document.getElementById('ytm-home-vibe-row')?.classList.toggle('hidden', prev.tab !== 'home');
         this._switchTab(prev.tab);
       } else if (prev.type === 'search') {
         this._activeTab = 'search';
@@ -3000,23 +3259,271 @@
       }
     },
 
-    // ─── Load Home ─────────────────────────────────────────────────────────────
+    // Home and personalized vibe feeds
 
-    async _loadHome() {
-      const cacheKey = 'home';
-      const cached = this._browseCache.get(cacheKey);
-      if (cached) return this._renderSections(cached);
+    _setHomeVibe(vibe) {
+      this._activeHomeVibe = vibe;
+      document.querySelectorAll('#ytm-home-vibe-row .ytm-vibe-pill').forEach(p => {
+        const isActive = p.dataset.vibe === vibe;
+        p.classList.toggle('active', isActive);
+        p.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+      });
+      this._loadHome(true);
+    },
+
+    async _loadHome(force = false) {
+      const vibe = this._activeHomeVibe || 'for_you';
+      const cacheKey = `home:${vibe}`;
+      if (!force) {
+        const cached = this._browseCache.get(cacheKey);
+        if (cached) return this._renderSections(cached);
+      }
       this._setSkeleton();
       try {
-        const sections = await API.getHome((u, o) => this._apiFetch(u, o));
+        let sections;
+        if (vibe === 'for_you') {
+          sections = await this._buildPersonalizedHome();
+        } else {
+          const vibeInfo = HOME_VIBES[vibe];
+          if (vibeInfo?.params) {
+            sections = await API.getMoodCategory(vibeInfo.params, (u, o) => this._apiFetch(u, o));
+          } else {
+            sections = await API.getHome((u, o) => this._apiFetch(u, o));
+          }
+        }
         this._browseCache.set(cacheKey, sections);
         this._renderSections(sections);
       } catch (e) {
-        this._setContent(this._emptyEl('⚠️', `Failed to load home: ${e.message}`));
+        console.error(`${PLUGIN_LABEL} load home error:`, e);
+        this._setContent(this._emptyEl(ICON.alert, `Failed to load home: ${e.message}`));
       }
     },
 
-    // ─── Load Trending ─────────────────────────────────────────────────────────
+    async _buildPersonalizedHome() {
+      const sections = [];
+      const libData = await this._analyzeLibrary();
+
+      const topArtistName = libData.topArtists?.[0]?.name;
+
+      const [editorialRes, newReleasesRes, artistSongsRes] = await Promise.allSettled([
+        API.getMoodCategory(HOME_VIBES.chill.params, (u, o) => this._apiFetch(u, o)),
+        API.getNewReleases((u, o) => this._apiFetch(u, o)),
+        topArtistName
+          ? API.search(topArtistName, (u, o) => this._apiFetch(u, o), 'songs')
+          : API.getHotTracks((u, o) => this._apiFetch(u, o))
+      ]);
+
+      const shortcutItems = [];
+
+      if (libData.totalTracks > 0) {
+        shortcutItems.push({
+          title: 'Shuffle My Library',
+          subtitle: `${libData.totalTracks} saved tracks`,
+          iconSvg: ICON.shuffle,
+          hasPlay: true,
+          onClick: () => this._shuffleLibraryTracks(),
+          onPlay: () => this._shuffleLibraryTracks(),
+        });
+      }
+
+      if (this._recentPlayed && this._recentPlayed.length > 0) {
+        const lastPlayed = this._recentPlayed[0];
+        shortcutItems.push({
+          title: lastPlayed.title,
+          subtitle: `Recent • ${lastPlayed.artist || 'Unknown'}`,
+          thumb: lastPlayed.thumb,
+          hasPlay: true,
+          onClick: () => this._playTrack(lastPlayed, this._recentPlayed),
+          onPlay: () => this._playTrack(lastPlayed, this._recentPlayed),
+        });
+      }
+
+      if (libData.topArtists?.length) {
+        for (const a of libData.topArtists.slice(0, 2)) {
+          shortcutItems.push({
+            title: a.name,
+            subtitle: `${a.count} saved songs`,
+            iconSvg: ICON.artist,
+            isCircle: true,
+            hasPlay: false,
+            onClick: () => this._searchAndOpenArtist(a.name),
+          });
+        }
+      }
+
+      if (shortcutItems.length < 4) {
+        shortcutItems.push({
+          title: 'New Studio Releases',
+          subtitle: 'Fresh albums & singles',
+          iconSvg: ICON.album,
+          hasPlay: false,
+          onClick: () => {
+            const el = document.querySelector('.ytm-new-releases-section');
+            if (el) el.scrollIntoView({ behavior: 'smooth' });
+          },
+        });
+      }
+      if (shortcutItems.length < 4) {
+        shortcutItems.push({
+          title: 'Chill Out Mixes',
+          subtitle: 'Acoustics & Lo-Fi',
+          iconSvg: ICON.music,
+          hasPlay: false,
+          onClick: () => this._setHomeVibe('chill'),
+        });
+      }
+
+      sections.push({
+        _type: 'shortcuts-grid',
+        items: shortcutItems,
+      });
+
+      if (this._recentPlayed && this._recentPlayed.length > 0) {
+        sections.push({
+          title: 'Jump Back In',
+          items: this._recentPlayed.slice(0, 10),
+          _type: 'shelf',
+        });
+      }
+
+      if (topArtistName && artistSongsRes.status === 'fulfilled' && artistSongsRes.value?.length) {
+        const songsSec = artistSongsRes.value.find(s => s.items?.length);
+        const songs = (songsSec ? songsSec.items : []).filter(i => i.videoId);
+        if (songs.length) {
+          sections.push({
+            title: `Because you like ${topArtistName}`,
+            items: songs.slice(0, 6),
+            _type: 'shelf',
+          });
+        }
+      }
+
+      if (editorialRes.status === 'fulfilled' && editorialRes.value?.length) {
+        for (const sec of editorialRes.value) {
+          if (sec.items?.length && (sec._type === 'carousel' || sec._type === 'shelf')) {
+            sections.push({
+              title: sec.title || 'Curated Moods & Mixes',
+              items: sec.items,
+              _type: sec._type,
+            });
+            break;
+          }
+        }
+      }
+
+      if (newReleasesRes.status === 'fulfilled' && newReleasesRes.value?.length) {
+        for (const sec of newReleasesRes.value) {
+          if (sec.items?.length) {
+            sections.push({
+              title: sec.title || 'New Releases',
+              items: sec.items,
+              _type: 'carousel',
+              className: 'ytm-new-releases-section',
+            });
+            break;
+          }
+        }
+      }
+
+      sections.push({
+        _type: 'vibe-tiles',
+        title: 'Explore by Mood & Moment',
+      });
+
+      return sections;
+    },
+
+    _renderShortcutsGrid(section) {
+      const container = document.createElement('div');
+      container.className = 'ytm-shortcuts-grid';
+
+      for (const item of (section.items || [])) {
+        const card = document.createElement('div');
+        card.className = 'ytm-shortcut-card';
+        card.setAttribute('role', 'button');
+        card.setAttribute('tabindex', '0');
+
+        const thumbHtml = item.thumb
+          ? `<img class="ytm-shortcut-thumb${item.isCircle ? ' circle' : ''}" src="${esc(item.thumb)}" loading="lazy" onerror="this.outerHTML='<div class=\\'ytm-shortcut-thumb${item.isCircle ? ' circle' : ''}\\'>${item.iconSvg || ICON.music}</div>'">`
+          : `<div class="ytm-shortcut-thumb${item.isCircle ? ' circle' : ''}">${item.iconSvg || ICON.music}</div>`;
+
+        card.innerHTML = `
+          ${thumbHtml}
+          <div class="ytm-shortcut-info">
+            <div class="ytm-shortcut-title">${esc(item.title)}</div>
+            <div class="ytm-shortcut-sub">${esc(item.subtitle)}</div>
+          </div>
+          ${item.hasPlay ? `<button class="ytm-shortcut-play-btn" title="Play">${ICON.play}</button>` : ''}
+        `;
+
+        card.onclick = (e) => {
+          if (item.onPlay && e.target.closest('.ytm-shortcut-play-btn')) {
+            e.stopPropagation();
+            item.onPlay();
+            return;
+          }
+          if (item.onClick) item.onClick();
+        };
+
+        card.onkeydown = (e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            if (item.onClick) item.onClick();
+          }
+        };
+
+        container.appendChild(card);
+      }
+
+      return container;
+    },
+
+    _renderVibeTiles(section) {
+      const container = document.createElement('div');
+      container.className = 'ytm-section';
+      container.innerHTML = `<div class="ytm-section-title">${esc(section.title || 'Explore by Mood & Moment')}</div>`;
+
+      const grid = document.createElement('div');
+      grid.className = 'ytm-vibe-tiles-grid';
+
+      const tiles = [
+        { vibe: 'chill', label: 'Chill', desc: 'Acoustic and ambient', bg: 'linear-gradient(145deg, #1a2a3a 0%, #203548 100%)' },
+        { vibe: 'focus', label: 'Focus', desc: 'Instrumental and beats', bg: 'linear-gradient(145deg, #162f2f 0%, #1f423f 100%)' },
+        { vibe: 'energize', label: 'Workout', desc: 'High energy and drive', bg: 'linear-gradient(145deg, #3d171d 0%, #542220 100%)' },
+        { vibe: 'feel_good', label: 'Feel Good', desc: 'Upbeat and bright', bg: 'linear-gradient(145deg, #3b2c12 0%, #523b18 100%)' },
+        { vibe: 'commute', label: 'Commute', desc: 'Road trip rotation', bg: 'linear-gradient(145deg, #231c38 0%, #362955 100%)' },
+        { vibe: 'party', label: 'Party', desc: 'Dance and celebrations', bg: 'linear-gradient(145deg, #3b1828 0%, #582136 100%)' },
+      ];
+
+      for (const t of tiles) {
+        const tile = document.createElement('div');
+        tile.className = 'ytm-vibe-tile';
+        tile.style.background = t.bg;
+        tile.setAttribute('role', 'button');
+        tile.setAttribute('tabindex', '0');
+        tile.innerHTML = `
+          <div class="ytm-vibe-tile-title">${esc(t.label)}</div>
+          <div class="ytm-vibe-tile-desc">${esc(t.desc)}</div>
+        `;
+        tile.onclick = () => {
+          this._setHomeVibe(t.vibe);
+          document.getElementById('ytm-content')?.scrollTo({ top: 0, behavior: 'smooth' });
+        };
+        tile.onkeydown = (e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            this._setHomeVibe(t.vibe);
+            document.getElementById('ytm-content')?.scrollTo({ top: 0, behavior: 'smooth' });
+          }
+        };
+        grid.appendChild(tile);
+      }
+
+      container.appendChild(grid);
+      return container;
+    },
+
+    // Trending
 
     async _loadTrending() {
       const cacheKey = 'trending';
@@ -3028,11 +3535,11 @@
         this._browseCache.set(cacheKey, sections);
         this._renderSections(sections);
       } catch (e) {
-        this._setContent(this._emptyEl('⚠️', `Failed to load trending: ${e.message}`));
+        this._setContent(this._emptyEl(ICON.alert, `Failed to load trending: ${e.message}`));
       }
     },
 
-    // ─── Search ────────────────────────────────────────────────────────────────
+    // Search
 
     async _performSearch(query) {
       this._currentQuery = query;
@@ -3054,23 +3561,27 @@
           this._renderSections(sections, true);
         }
       } catch (e) {
-        this._setContent(this._emptyEl('⚠️', `Search failed: ${e.message}`));
+        this._setContent(this._emptyEl(ICON.alert, `Search failed: ${e.message}`));
       }
     },
 
-    // ─── Render: Section list ──────────────────────────────────────────────────
+    // Section list rendering
 
     _renderSections(sections, isSearch = false) {
       if (!sections || !sections.length) {
-        return this._setContent(this._emptyEl('🎵', 'Nothing to show'));
+        return this._setContent(this._emptyEl(ICON.music, 'Nothing to show'));
       }
 
       const wrap = document.createElement('div');
       for (const section of sections) {
-        if (!section.item && (!section.items || !section.items.length)) continue;
+        if (!section.item && (!section.items || !section.items.length) && section._type !== 'vibe-tiles') continue;
 
         let el;
-        if (section._type === 'card-hero') {
+        if (section._type === 'shortcuts-grid') {
+          el = this._renderShortcutsGrid(section);
+        } else if (section._type === 'vibe-tiles') {
+          el = this._renderVibeTiles(section);
+        } else if (section._type === 'card-hero') {
           el = this._renderCardHero(section);
         } else {
           const items = section.items || [];
@@ -3082,8 +3593,8 @@
           if (isSongList) {
             el = this._renderTrackSection(section);
           } else if (isMixed) {
-            const songSection = { title: section.title, items: items.filter(i => i.videoId) };
-            const cardSection = { title: null,           items: items.filter(i => i.browseId && !i.videoId) };
+            const songSection = { title: section.title, items: items.filter(i => i.videoId), className: section.className };
+            const cardSection = { title: null,           items: items.filter(i => i.browseId && !i.videoId), className: section.className };
             el = document.createElement('div');
             if (cardSection.items.length) el.appendChild(this._renderCardSection(cardSection));
             if (songSection.items.length) el.appendChild(this._renderTrackSection(songSection));
@@ -3094,7 +3605,7 @@
         if (el) wrap.appendChild(el);
       }
 
-      if (!wrap.children.length) return this._setContent(this._emptyEl('🎵', 'Nothing to show'));
+      if (!wrap.children.length) return this._setContent(this._emptyEl(ICON.music, 'Nothing to show'));
       this._setContent(wrap);
     },
 
@@ -3144,7 +3655,7 @@
 
     _renderCardSection(section) {
       const container = document.createElement('div');
-      container.className = 'ytm-section';
+      container.className = 'ytm-section' + (section.className ? ' ' + section.className : '');
       if (section.title) {
         container.innerHTML = `<div class="ytm-section-title">${esc(section.title)}</div>`;
       }
@@ -3221,7 +3732,7 @@
 
     _renderTrackSection(section, showNumbers = false) {
       const container = document.createElement('div');
-      container.className = 'ytm-section';
+      container.className = 'ytm-section' + (section.className ? ' ' + section.className : '');
       if (section.title) {
         container.innerHTML = `<div class="ytm-section-title">${esc(section.title)}</div>`;
       }
@@ -3322,7 +3833,7 @@
       return container;
     },
 
-    // ─── Navigate into item (artist/album/playlist/song) ───────────────────────
+    // Navigation helpers
 
     async _navigateItem(item) {
       if (item.videoId && !item.browseId) {
@@ -3357,7 +3868,7 @@
         document.getElementById('ytm-panel-title').textContent = this._currentNavState.title;
         this._renderArtistPage(artist);
       } catch (e) {
-        this._setContent(this._emptyEl('⚠️', `Failed to load artist: ${e.message}`));
+        this._setContent(this._emptyEl(ICON.alert, `Failed to load artist: ${e.message}`));
       }
     },
 
@@ -3401,14 +3912,13 @@
         document.getElementById('ytm-panel-title').textContent = this._currentNavState.title;
         this._renderAlbumPage(album);
       } catch (e) {
-        this._setContent(this._emptyEl('⚠️', `Failed to load album: ${e.message}`));
+        this._setContent(this._emptyEl(ICON.alert, `Failed to load album: ${e.message}`));
       }
     },
 
     _renderAlbumPage(album) {
       const wrap = document.createElement('div');
 
-      // Hero
       const hero = document.createElement('div');
       hero.className = 'ytm-hero';
       hero.innerHTML = `
@@ -3437,7 +3947,6 @@
         };
       }
 
-      // Action row: Play All + Like Album
       const actionRow = document.createElement('div');
       actionRow.className = 'ytm-action-row';
 
@@ -3541,7 +4050,7 @@
         document.getElementById('ytm-panel-title').textContent = this._currentNavState.title;
         this._renderPlaylistPage(playlist);
       } catch (e) {
-        this._setContent(this._emptyEl('⚠️', `Failed to load playlist: ${e.message}`));
+        this._setContent(this._emptyEl(ICON.alert, `Failed to load playlist: ${e.message}`));
       }
     },
 
@@ -3653,12 +4162,12 @@
       this._setSkeleton();
       try {
         const tracks = await API.getWatchPlaylist(videoId, playlistId, (u, o) => this._apiFetch(u, o));
-        if (!tracks.length) return this._setContent(this._emptyEl('🎵', 'No tracks found'));
+        if (!tracks.length) return this._setContent(this._emptyEl(ICON.music, 'No tracks found'));
         const section = { title: 'Related tracks', items: tracks };
         const list = this._renderTrackSection(section);
-        this._setContent(list || this._emptyEl('🎵', 'No tracks found'));
+        this._setContent(list || this._emptyEl(ICON.music, 'No tracks found'));
       } catch (e) {
-        this._setContent(this._emptyEl('⚠️', `Failed to load: ${e.message}`));
+        this._setContent(this._emptyEl(ICON.alert, `Failed to load: ${e.message}`));
       }
     },
 
@@ -3689,7 +4198,7 @@
       }
     },
 
-    // ─── Playback ──────────────────────────────────────────────────────────────
+    // Playback
 
     async _resolveOfficialSong(track) {
       if (!track || !track.title) return null;
@@ -3756,7 +4265,6 @@
 
         const exactDuration = targetTrack.duration || videoDurationCache.get(targetTrack.videoId) || null;
 
-        // Build clean queue array
         const queueItems = (Array.isArray(queue) && queue.length > 0) ? queue : [targetTrack];
         const fullQueue = queueItems.filter(t => t.videoId).map(t => {
           const isTarget = t.videoId === track.videoId || t.videoId === targetTrack.videoId;
@@ -3790,6 +4298,7 @@
           await this.api.player.setTrack(fullQueue[startIndex]);
         }
 
+        this._recordPlayHistory(targetTrack);
         this._playingVideoId = targetTrack.videoId;
         this._updatePlayingHighlight();
       } catch (e) {
@@ -3907,7 +4416,7 @@
       });
     },
 
-    // ─── Skeleton / Content helpers ────────────────────────────────────────────
+    // Skeleton & content helpers
 
     _setSkeleton() {
       const s = (w, h) => `<div class="ytm-skel" style="width:${w};height:${h};margin-bottom:4px;"></div>`;
@@ -3939,11 +4448,11 @@
     _emptyEl(icon, msg) {
       const el = document.createElement('div');
       el.className = 'ytm-empty';
-      el.innerHTML = `<div class="ytm-empty-icon">${icon}</div><div>${esc(msg)}</div>`;
+      el.innerHTML = `<div class="ytm-empty-icon">${icon || ICON.music}</div><div>${esc(msg)}</div>`;
       return el;
     },
 
-    // ─── Toast ─────────────────────────────────────────────────────────────────
+    // Toast
     _toastTimer: null,
     _toast(msg) {
       const el = document.getElementById('ytm-toast');
@@ -3955,7 +4464,7 @@
     },
   };
 
-  // ─── Bootstrap ───────────────────────────────────────────────────────────────
+  // Bootstrap
   if (typeof Audion !== 'undefined' && Audion.register) {
     Audion.register(YouTubeMusic);
   } else {

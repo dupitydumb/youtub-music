@@ -1,14 +1,15 @@
-// YouTube Music Plugin for Audion v1.4.0
-// Client for YouTube Music: Personalized Home, Mood Feeds, Studio Prioritization, and URL Import.
+// YouTube Music Plugin for Audion v1.5.0
+// Client for YouTube Music: Personalized Home, Mood Feeds, Studio Prioritization, URL Import, and Spotify Playlist Converter.
 
 (function () {
   'use strict';
 
   // Constants
 
-  const SOURCE_TYPE  = 'youtube';
-  const PLUGIN_ID    = 'youtube-music';
-  const PLUGIN_LABEL = '[YTMusic]';
+  const SOURCE_TYPE       = 'youtube';
+  const PLUGIN_ID         = 'youtube-music';
+  const PLUGIN_LABEL      = '[YTMusic]';
+  const SPOTIFY_API_BASE  = 'https://spotify-api-henna.vercel.app/api/playlist';
 
   // YouTube Music InnerTube (WEB_REMIX client — music-specific endpoints)
   const YTM_BASE    = 'https://music.youtube.com/youtubei/v1';
@@ -108,6 +109,9 @@
     link:    `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>`,
     check:   `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`,
     wand:    `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 4-2 4 4 2-4-2-2-4Z"/><path d="m3 21 9-9"/><path d="M12.2 6.8 4 15l2 2 8.2-8.2Z"/></svg>`,
+    spotify: `<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141 4.32-1.38 9.841-.719 13.44 1.56.42.3.6.84.3 1.26zm.12-3.36C14.939 8.46 8.641 8.28 5.1 9.421c-.6.18-1.26-.12-1.441-.72-.18-.6.12-1.26.72-1.44 4.08-1.26 11.04-1.02 15.361 1.56.6.358.779 1.14.421 1.74-.359.6-1.14.779-1.741.419z"/></svg>`,
+    upload:  `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>`,
+    stop:    `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>`,
   };
 
   // Helpers
@@ -393,6 +397,325 @@
     }
 
     return null;
+  }
+
+  // Spotify converter helpers
+
+  function parseSpotifyUrl(urlOrUri, allowBareId = false) {
+    if (!urlOrUri || typeof urlOrUri !== 'string') return null;
+    const str = urlOrUri.trim();
+
+    const uriMatch = str.match(/^spotify:playlist:([a-zA-Z0-9]+)(?:\?.*)?$/i);
+    if (uriMatch) {
+      return {
+        type: 'spotify-playlist',
+        playlistId: uriMatch[1],
+        url: `https://open.spotify.com/playlist/${uriMatch[1]}`,
+      };
+    }
+
+    if (allowBareId && !/[/:.\s]/.test(str.split('?')[0])) {
+      const bareMatch = str.match(/^([a-zA-Z0-9]{15,32})(?:\?.*)?$/);
+      if (bareMatch) {
+        return {
+          type: 'spotify-playlist',
+          playlistId: bareMatch[1],
+          url: `https://open.spotify.com/playlist/${bareMatch[1]}`,
+        };
+      }
+    }
+
+    try {
+      const candidate = /^[a-zA-Z]+:\/\//.test(str) ? str : `https://${str}`;
+      const u = new URL(candidate);
+      const host = u.hostname.toLowerCase();
+      if (!host.includes('spotify.com')) return null;
+
+      const plMatch = u.pathname.match(/\/playlist\/([a-zA-Z0-9]+)/i);
+      if (plMatch) {
+        return { type: 'spotify-playlist', playlistId: plMatch[1], url: str };
+      }
+
+      if (/\/(track|album|artist)\/[a-zA-Z0-9]+/i.test(u.pathname)) {
+        return { type: 'spotify-unsupported', url: str };
+      }
+    } catch (_) {
+      return null;
+    }
+
+    return null;
+  }
+
+  function parseDurationToMs(timeStr) {
+    if (!timeStr) return 0;
+    if (typeof timeStr === 'number') {
+      if (!Number.isFinite(timeStr) || timeStr <= 0) return 0;
+      return timeStr > 3600 ? Math.round(timeStr) : Math.round(timeStr * 1000);
+    }
+    try {
+      const parts = String(timeStr).trim().split(':').map(p => parseInt(p, 10));
+      if (parts.some(isNaN)) return 0;
+      if (parts.length === 3) return (parts[0] * 3600 + parts[1] * 60 + parts[2]) * 1000;
+      if (parts.length === 2) return (parts[0] * 60 + parts[1]) * 1000;
+      if (parts.length === 1) return parts[0] * 1000;
+    } catch (_) {}
+    return 0;
+  }
+
+  function normalizeMatchStr(str) {
+    if (!str) return '';
+    return String(str)
+      .toLowerCase()
+      .normalize('NFKD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[\(\[]\s*(?:feat|ft)\.?\s+[^)\]]+[\)\]]/gi, ' ')
+      .replace(/\b(?:feat|ft)\.?\s+[^,-]+/gi, ' ')
+      .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  function normalizeSpotifyTracks(tracks) {
+    if (!Array.isArray(tracks)) return [];
+    const out = [];
+    for (const item of tracks) {
+      const t = (item && item.track && typeof item.track === 'object') ? item.track : item;
+      if (!t || typeof t !== 'object') continue;
+      const rawTitle = (t.songTitle || t.title || t.name || '').trim();
+      if (!rawTitle) continue;
+      const artist = Array.isArray(t.artist)
+        ? t.artist.join(', ')
+        : Array.isArray(t.artists)
+          ? t.artists.map(a => typeof a === 'string' ? a : (a?.name || '')).filter(Boolean).join(', ')
+          : (t.artist || t.artist_name || 'Unknown');
+      const album = (t.album && typeof t.album === 'object') ? (t.album.name || null) : (t.album || null);
+      const durMs = (typeof t.duration_ms === 'number' && t.duration_ms > 0)
+        ? Math.round(t.duration_ms)
+        : parseDurationToMs(t.duration || t.durationMs || 0);
+      out.push({
+        title: rawTitle,
+        artist: artist || 'Unknown',
+        album,
+        duration_ms: durMs,
+        cover_url: t.image || t.cover_url || t.cover || null,
+        isrc: t.isrc || t.external_ids?.isrc || null,
+      });
+    }
+    return out;
+  }
+
+  function normalizeSpotifyJson(json) {
+    if (Array.isArray(json)) {
+      const tracks = normalizeSpotifyTracks(json);
+      return {
+        title: 'JSON Import',
+        description: `Imported ${tracks.length} tracks`,
+        owner: null,
+        image: tracks.find(t => t.cover_url)?.cover_url || null,
+        tracks,
+      };
+    }
+    if (!json || typeof json !== 'object') {
+      throw new Error('Invalid JSON format');
+    }
+    const rawTracks = Array.isArray(json.tracks)
+      ? json.tracks
+      : Array.isArray(json.tracks?.items)
+        ? json.tracks.items
+        : Array.isArray(json.items)
+          ? json.items
+          : null;
+    if (!rawTracks) {
+      throw new Error('JSON file does not contain a tracks array');
+    }
+    const tracks = normalizeSpotifyTracks(rawTracks);
+    return {
+      title: json.title || json.name || 'JSON Import',
+      description: json.description || '',
+      owner: (typeof json.owner === 'object' ? (json.owner?.display_name || json.owner?.id) : json.owner) || null,
+      image: json.image || json.cover_url || json.cover || (Array.isArray(json.images) ? json.images[0]?.url : null) || null,
+      tracks,
+    };
+  }
+
+  function buildSpotifySearchQuery(title, artist) {
+    let qTitle = String(title || '')
+      .replace(/[\(\[]\s*(?:feat|ft)\.?\s+[^)\]]+[\)\]]/gi, '')
+      .replace(/\s+[-–]\s+(?:remaster(?:ed)?(?:\s+\d{4})?|\d{4}\s+remaster(?:ed)?|radio\s+edit|album\s+version|single\s+version|explicit|clean)$/i, '')
+      .replace(/\s*[\(\[]\s*(?:remaster(?:ed)?(?:\s+\d{4})?|\d{4}\s+remaster(?:ed)?)\s*[\)\]]/gi, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!qTitle) qTitle = String(title || '').trim();
+
+    let primaryArtist = '';
+    if (artist && !/^(unknown|unknown artist|various|various artists)$/i.test(artist.trim())) {
+      primaryArtist = artist.split(',')[0].trim();
+    }
+    return `${qTitle} ${primaryArtist}`.trim();
+  }
+
+  function scoreYtmCandidate(spotifyTrack, candidate) {
+    if (!candidate || !candidate.videoId) return -Infinity;
+
+    const targetTitleNorm = normalizeMatchStr(spotifyTrack.title);
+    const targetCleanBase = normalizeMatchStr(buildSpotifySearchQuery(spotifyTrack.title, ''));
+    const candTitleNorm = normalizeMatchStr(candidate.title);
+    const rawArtist = (spotifyTrack.artist && !/^(unknown|unknown artist)$/i.test(spotifyTrack.artist))
+      ? spotifyTrack.artist
+      : '';
+    const targetArtistNorm = normalizeMatchStr(rawArtist ? rawArtist.split(',')[0] : '');
+    const allSpotifyArtistsNorm = normalizeMatchStr(rawArtist);
+    const candArtistNorm = normalizeMatchStr(candidate.artist || '');
+
+    let score = 0;
+    let titleMatched = false;
+
+    if (targetTitleNorm && candTitleNorm) {
+      if (candTitleNorm === targetTitleNorm || (targetCleanBase && candTitleNorm === targetCleanBase)) {
+        score += 50;
+        titleMatched = true;
+      } else if (
+        candTitleNorm.includes(targetTitleNorm) ||
+        targetTitleNorm.includes(candTitleNorm) ||
+        (targetCleanBase && (candTitleNorm.includes(targetCleanBase) || targetCleanBase.includes(candTitleNorm)))
+      ) {
+        score += 36;
+        titleMatched = true;
+      } else {
+        const tWords = new Set((targetCleanBase || targetTitleNorm).split(' ').filter(Boolean));
+        const cWords = new Set(candTitleNorm.split(' ').filter(Boolean));
+        let overlap = 0;
+        for (const w of tWords) if (cWords.has(w)) overlap++;
+        const recall = tWords.size > 0 ? overlap / tWords.size : 0;
+        if (overlap > 0) {
+          score += Math.round(recall * 30);
+          titleMatched = recall >= 0.4;
+        } else {
+          score -= 35;
+        }
+      }
+    }
+
+    const derivativeTerms = ['karaoke', 'tribute', 'cover', '8d audio', 'slowed', 'nightcore', 'instrumental', 'sped up'];
+    const rawTargetLower = (spotifyTrack.title || '').toLowerCase();
+    const rawCandLower = `${candidate.title || ''} ${candidate.subtitle || ''}`.toLowerCase();
+    for (const term of derivativeTerms) {
+      if (rawCandLower.includes(term) && !rawTargetLower.includes(term)) {
+        score -= 25;
+        break;
+      }
+    }
+
+    let artistMatched = false;
+    if (targetArtistNorm) {
+      if (candArtistNorm && (candArtistNorm === targetArtistNorm || candArtistNorm === allSpotifyArtistsNorm)) {
+        score += 32;
+        artistMatched = true;
+      } else if (
+        candArtistNorm &&
+        candArtistNorm.length > 1 &&
+        (candArtistNorm.includes(targetArtistNorm) ||
+          targetArtistNorm.includes(candArtistNorm) ||
+          allSpotifyArtistsNorm.includes(candArtistNorm))
+      ) {
+        score += 26;
+        artistMatched = true;
+      } else {
+        const aWords = targetArtistNorm.split(' ').filter(w => w.length > 1);
+        const cHaystack = `${candArtistNorm} ${candTitleNorm}`;
+        let aOverlap = 0;
+        for (const w of aWords) if (cHaystack.includes(w)) aOverlap++;
+        if (aWords.length > 0 && aOverlap > 0) {
+          score += Math.round((aOverlap / aWords.length) * 20);
+          artistMatched = aOverlap / aWords.length >= 0.5;
+        } else {
+          score -= 22;
+        }
+      }
+    }
+
+    if (candidate.musicVideoType === 'MUSIC_VIDEO_TYPE_ATV') {
+      score += 24;
+    } else if (candidate.isSong && !candidate.isVideo) {
+      score += 18;
+    } else if (candidate.isVideo) {
+      score -= 15;
+    }
+
+    const targetSec = spotifyTrack.duration_ms > 0 ? Math.round(spotifyTrack.duration_ms / 1000) : 0;
+    if (targetSec > 0 && candidate.duration > 0) {
+      const diff = Math.abs(targetSec - candidate.duration);
+      if (diff <= 3) score += 20;
+      else if (diff <= 8) score += 14;
+      else if (diff <= 15) score += 6;
+      else if (diff > 45) score -= 20;
+    }
+
+    if (!titleMatched && !artistMatched) return -50;
+    return score;
+  }
+
+  async function fetchSpotifyPlaylistFromAPI(playlistId, apiFetch, opts = {}) {
+    const { signal, onPage, onLog } = opts;
+    const limit = 100;
+    let offset = 0;
+    let allTracks = [];
+    let playlistMeta = null;
+    let total = 0;
+    let page = 1;
+
+    while (true) {
+      if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+      const url = `${SPOTIFY_API_BASE}/${encodeURIComponent(playlistId)}?limit=${limit}&offset=${offset}`;
+      const response = await apiFetch(url, signal ? { signal } : {});
+      if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+      if (!response) {
+        throw new Error('Spotify API error: Network failure');
+      }
+      if (!response.ok) {
+        let errDetail = '';
+        if (typeof response.json === 'function') {
+          try {
+            const errJson = await response.json();
+            if (errJson?.error) errDetail = errJson.error;
+          } catch (_) {}
+        }
+        throw new Error(errDetail || `Spotify API error: ${response.status || 'Request failed'}`);
+      }
+      const json = await response.json();
+      if (!json?.success || !json?.data) {
+        throw new Error(json?.error || 'Invalid Spotify API response');
+      }
+      const data = json.data;
+
+      if (!playlistMeta) {
+        playlistMeta = {
+          title: data.name || 'Spotify Import',
+          description: data.description || '',
+          image: data.image || null,
+          owner: data.owner || null,
+        };
+        total = data.total || 0;
+      }
+
+      const rawTracks = Array.isArray(data.tracks) ? data.tracks : [];
+      const pageTracks = normalizeSpotifyTracks(rawTracks);
+      allTracks = allTracks.concat(pageTracks);
+
+      onLog?.(`Page ${page}: ${pageTracks.length} tracks (${allTracks.length}/${total || allTracks.length})`, 'info');
+      onPage?.({ ...playlistMeta, total: total || allTracks.length, tracks: allTracks });
+
+      if (!data.next || rawTracks.length === 0 || (total > 0 && allTracks.length >= total)) {
+        if (total > 0 && allTracks.length < total) {
+          onLog?.(`Fetched ${allTracks.length} of ${total} tracks before pagination ended`, 'warn');
+        }
+        break;
+      }
+      offset += limit;
+      page++;
+    }
+
+    return { ...playlistMeta, total: total || allTracks.length, tracks: allTracks };
   }
 
   function extractContinuationToken(r) {
@@ -1414,6 +1737,7 @@
         padding-bottom: var(--safe-area-bottom, 0px);
       }
       #ytm-panel.open { transform: none !important; }
+      .ytm-header { gap: 6px; padding: 10px 12px; }
     }
 
     /* Header */
@@ -2007,10 +2331,149 @@
       border: 1px solid var(--ytm-red, #ff0033); border-radius: var(--radius-md, 8px);
       display: flex; flex-direction: column; gap: 10px;
     }
+    .ytm-url-detected-card.spotify { border-color: #1db954; }
     .ytm-url-badge { display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 700; color: var(--ytm-red, #ff0033); text-transform: uppercase; letter-spacing: 0.5px; }
+    .ytm-url-badge.spotify { color: #1ed760; }
     .ytm-url-detected-title { font-size: 16px; font-weight: 700; color: #fff; }
     .ytm-url-detected-desc { font-size: 12px; color: var(--text-secondary, #bbb); word-break: break-all; font-family: monospace; background: rgba(0,0,0,0.2); padding: 6px 10px; border-radius: 4px; }
     .ytm-url-detected-actions { display: flex; gap: 8px; margin-top: 4px; }
+
+    /* Spotify converter inside import modal */
+    .ytm-import-tabs {
+      display: flex; gap: 4px; padding: 0 24px;
+      border-bottom: 1px solid var(--border-color, #333333);
+      background: var(--bg-elevated, #181818); flex-shrink: 0;
+    }
+    .ytm-import-tab {
+      display: inline-flex; align-items: center; gap: 7px;
+      padding: 10px 14px; font-size: var(--font-size-xs, 12px); font-weight: 600;
+      color: var(--text-secondary, #c8c8c8); cursor: pointer;
+      background: none; border: none; border-bottom: 2px solid transparent;
+      transition: color var(--transition-fast, 150ms ease), border-color var(--transition-fast, 150ms ease);
+      white-space: nowrap;
+    }
+    .ytm-import-tab:hover { color: var(--text-primary, #ffffff); }
+    .ytm-import-tab.active { color: var(--text-primary, #ffffff); border-bottom-color: var(--ytm-red, #ff0033); }
+    .ytm-import-tab:disabled { opacity: 0.45; cursor: not-allowed; }
+    .ytm-import-tab[data-import-mode="spotify"] svg { color: #1ed760; }
+    .ytm-import-modal-spotify #ytm-import-modal-logo { color: #1ed760; }
+
+    #ytm-import-pane-youtube, #ytm-import-pane-spotify {
+      display: flex; flex-direction: column; gap: 14px;
+    }
+    .ytm-sp-clear-btn {
+      position: absolute; right: 8px; width: 24px; height: 24px; border-radius: 4px;
+      background: rgba(255,255,255,0.08); border: none; color: #c8c8c8; cursor: pointer;
+      display: flex; align-items: center; justify-content: center; font-size: 12px;
+      transition: background var(--transition-fast, 150ms ease), color var(--transition-fast, 150ms ease);
+    }
+    .ytm-sp-clear-btn:hover { background: rgba(255,255,255,0.16); color: #fff; }
+    .ytm-sp-input-pad { padding-right: 36px !important; }
+    .ytm-sp-upload-row {
+      display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 2px;
+    }
+    .ytm-sp-upload-btn {
+      display: inline-flex; align-items: center; gap: 7px;
+      padding: 6px 12px; min-height: 32px; box-sizing: border-box;
+      background: var(--bg-surface, #282828); border: 1px dashed var(--border-color, #484848);
+      border-radius: var(--radius-sm, 6px); color: var(--text-secondary, #c8c8c8);
+      font-size: 12px; font-weight: 600; cursor: pointer;
+      transition: border-color var(--transition-fast, 150ms ease), color var(--transition-fast, 150ms ease), background var(--transition-fast, 150ms ease);
+    }
+    .ytm-sp-upload-btn:hover {
+      border-color: var(--text-secondary, #c8c8c8); color: #ffffff; background: var(--bg-highlight, #343434);
+    }
+    .ytm-sp-pill {
+      display: inline-flex; align-items: center; gap: 8px; padding: 5px 10px; min-height: 32px; box-sizing: border-box;
+      background: var(--bg-surface, #282828); border: 1px solid var(--border-color, #484848);
+      border-radius: var(--radius-sm, 6px); max-width: 100%;
+    }
+    .ytm-sp-pill-icon { color: #22c55e; display: flex; flex-shrink: 0; }
+    .ytm-sp-pill-text { font-size: 12px; color: var(--text-primary, #ffffff); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .ytm-sp-pill-remove {
+      background: transparent; border: none; border-radius: 4px; color: var(--text-secondary, #c8c8c8);
+      cursor: pointer; padding: 2px 5px; font-size: 12px; display: flex; align-items: center; justify-content: center;
+    }
+    .ytm-sp-pill-remove:hover { background: rgba(239, 68, 68, 0.25); color: #fca5a5; }
+    .ytm-sp-help-btn {
+      background: none; border: none; padding: 4px 6px; margin-left: auto; cursor: pointer;
+      color: var(--text-secondary, #c8c8c8); font-size: 12px; font-weight: 600; text-decoration: underline;
+    }
+    .ytm-sp-help-btn:hover { color: #ffffff; }
+    .ytm-sp-help-box {
+      background: var(--bg-base, #141414); border: 1px solid var(--border-color, #333333);
+      border-radius: var(--radius-sm, 6px); padding: 10px 14px; font-size: 12px;
+      color: var(--text-secondary, #c8c8c8); line-height: 1.65;
+    }
+    .ytm-sp-help-box strong { color: #ffffff; }
+    .ytm-sp-help-box a { color: #60a5fa; font-weight: 600; }
+    .ytm-sp-help-box ol { margin: 6px 0 0 18px; padding: 0; }
+    .ytm-sp-error {
+      background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.35);
+      border-radius: var(--radius-md, 8px); padding: 10px 14px; font-size: 12px;
+      color: #fca5a5; display: flex; align-items: center; gap: 8px;
+    }
+    .ytm-sp-thumb-placeholder {
+      width: 90px; height: 90px; border-radius: var(--radius-md, 8px);
+      background: var(--bg-base, #161616); border: 1px solid var(--border-color, #383838);
+      display: flex; align-items: center; justify-content: center; color: #1ed760; flex-shrink: 0;
+    }
+    .ytm-sp-priority-badge {
+      display: inline-flex; align-items: center; gap: 4px; padding: 2px 7px; border-radius: 999px;
+      font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px;
+      background: var(--ytm-red-subtle, rgba(255, 0, 51, 0.14)); color: #ff8596;
+      border: 1px solid rgba(255, 0, 51, 0.35);
+    }
+    .ytm-sp-row-art-fallback {
+      width: 34px; height: 34px; border-radius: 4px; background: #2c2c2c; color: var(--text-subdued, #8e8e8e);
+      display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+    }
+    .ytm-sp-row-badge {
+      display: inline-block; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px;
+      padding: 1px 5px; border-radius: 4px; vertical-align: middle; margin-left: 5px;
+    }
+    .ytm-sp-row-badge.added { background: rgba(34, 197, 94, 0.18); color: #86efac; border: 1px solid rgba(34, 197, 94, 0.35); }
+    .ytm-sp-row-badge.lib { background: rgba(245, 158, 11, 0.18); color: #fde68a; border: 1px solid rgba(245, 158, 11, 0.35); }
+    .ytm-sp-row-badge.miss { background: rgba(239, 68, 68, 0.18); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.35); }
+    .ytm-sp-prog-hdr { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .ytm-sp-prog-label { font-size: 12px; font-weight: 600; color: var(--text-primary, #ffffff); }
+    .ytm-sp-prog-pct { font-size: 13px; font-weight: 700; color: var(--text-primary, #ffffff); font-variant-numeric: tabular-nums; }
+    .ytm-sp-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+    .ytm-sp-stat { border-radius: var(--radius-sm, 6px); padding: 8px 10px; display: flex; flex-direction: column; gap: 2px; background: var(--bg-base, #121212); border: 1px solid var(--border-color, #2f2f2f); }
+    .ytm-sp-stat-val { font-size: 18px; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; }
+    .ytm-sp-stat.green .ytm-sp-stat-val { color: #22c55e; }
+    .ytm-sp-stat.amber .ytm-sp-stat-val { color: #fbbf24; }
+    .ytm-sp-stat.red .ytm-sp-stat-val { color: #f87171; }
+    .ytm-sp-stat-lbl { font-size: 11px; font-weight: 600; color: var(--text-secondary, #c8c8c8); }
+    .ytm-sp-log-card {
+      background: var(--bg-base, #121212); border: 1px solid var(--border-color, #2f2f2f);
+      border-radius: var(--radius-sm, 6px); display: flex; flex-direction: column; overflow: hidden;
+    }
+    .ytm-sp-log-hdr {
+      padding: 6px 10px; border-bottom: 1px solid var(--border-color, #2a2a2a);
+      font-size: 10px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; color: #a0a0a0;
+    }
+    .ytm-sp-log-wrap { max-height: 130px; overflow-y: auto; padding: 8px 10px; display: flex; flex-direction: column; gap: 4px; }
+    .ytm-sp-log-wrap::-webkit-scrollbar { width: 4px; }
+    .ytm-sp-log-wrap::-webkit-scrollbar-thumb { background: var(--border-color, #404040); border-radius: 3px; }
+    .ytm-sp-log-line { display: flex; align-items: baseline; gap: 8px; font-size: 11.5px; line-height: 1.45; }
+    .ytm-sp-log-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; background: #737373; }
+    .ytm-sp-log-msg { color: var(--text-secondary, #c8c8c8); word-break: break-word; }
+    .ytm-sp-log-line.success .ytm-sp-log-dot { background: #22c55e; }
+    .ytm-sp-log-line.success .ytm-sp-log-msg { color: #86efac; }
+    .ytm-sp-log-line.warn .ytm-sp-log-dot { background: #fbbf24; }
+    .ytm-sp-log-line.warn .ytm-sp-log-msg { color: #fde68a; }
+    .ytm-sp-log-line.error .ytm-sp-log-dot { background: #f87171; }
+    .ytm-sp-log-line.error .ytm-sp-log-msg { color: #fca5a5; }
+    .ytm-sp-log-line.info .ytm-sp-log-dot { background: #60a5fa; }
+    .ytm-btn:disabled { opacity: 0.45; cursor: not-allowed; transform: none !important; }
+    @media (max-width: 600px) {
+      .ytm-import-body { padding: 14px 16px; }
+      .ytm-import-tabs { padding: 0 16px; }
+      .ytm-import-hero { flex-direction: column; align-items: flex-start; gap: 12px; }
+      .ytm-import-actions-bar { flex-direction: column; align-items: stretch; }
+      .ytm-import-action-buttons { flex-wrap: wrap; }
+    }
 
     /* Utilities */
     .hidden { display: none !important; }
@@ -2022,6 +2485,16 @@
   const YouTubeMusic = {
     api:        null,
     _API:       API,
+    _Spotify: {
+      parseSpotifyUrl,
+      parseDurationToMs,
+      normalizeMatchStr,
+      normalizeSpotifyTracks,
+      normalizeSpotifyJson,
+      buildSpotifySearchQuery,
+      scoreYtmCandidate,
+      fetchSpotifyPlaylistFromAPI,
+    },
     isOpen:     false,
     libraryIds: new Set(),
     _searchTimer: null,
@@ -2039,8 +2512,22 @@
     _searchCache: new MemCache(5 * 60 * 1000),   // 5 min
     _browseCache:  new MemCache(10 * 60 * 1000),  // 10 min
     _importAbortController: null,
+    _fixAbortController: null,
     _importedData: null,
     _selectedTrackIndices: new Set(),
+    _spotifySelectedIndices: new Set(),
+    _spotifyTracksData: [],
+    _importMode: 'youtube',
+    _spotifyTrackCache: new Map(),
+    _spotifyState: {
+      isConverting: false,
+      stopRequested: false,
+      abortController: null,
+      importedData: null,
+      fetchedUrl: '',
+      sourceKind: null,
+      isHelpOpen: false,
+    },
 
     config: {
       pipedInstances: [...PIPED_INSTANCES],
@@ -2304,11 +2791,15 @@
           <div class="ytm-settings-body" id="ytm-settings-body"></div>
         </div>
 
-        <div id="ytm-import-modal" role="region" aria-label="Import from URL">
+        <div id="ytm-import-modal" role="region" aria-label="Import Playlist">
           <div class="ytm-header">
-            <div class="ytm-logo" aria-hidden="true">${ICON.import}</div>
-            <div class="ytm-title">Import Playlist from URL</div>
+            <div class="ytm-logo" id="ytm-import-modal-logo" aria-hidden="true">${ICON.import}</div>
+            <div class="ytm-title" id="ytm-import-modal-title">Import Playlist</div>
             <button id="ytm-import-close" class="ytm-icon-btn" title="Close import" aria-label="Close import dialog">${ICON.close}</button>
+          </div>
+          <div class="ytm-import-tabs" role="tablist" aria-label="Import mode">
+            <button class="ytm-import-tab active" data-import-mode="youtube" role="tab" aria-selected="true">${ICON.ytmusic} YouTube URL</button>
+            <button class="ytm-import-tab" data-import-mode="spotify" role="tab" aria-selected="false">${ICON.spotify} Spotify to YouTube</button>
           </div>
           <div class="ytm-import-body" id="ytm-import-body"></div>
         </div>
@@ -2317,6 +2808,7 @@
           <button id="ytm-back-btn" class="ytm-icon-btn hidden" title="Back" aria-label="Back">${ICON.back}</button>
           <div class="ytm-logo" aria-hidden="true">${ICON.ytmusic}</div>
           <div class="ytm-title" id="ytm-panel-title">YouTube Music</div>
+          <button id="ytm-spotify-open" class="ytm-icon-btn" title="Spotify to YouTube Converter" aria-label="Convert Spotify playlist to YouTube Music">${ICON.spotify}</button>
           <button id="ytm-import-open" class="ytm-icon-btn" title="Import from URL" aria-label="Import playlist from URL">${ICON.import}</button>
           <button id="ytm-settings-open" class="ytm-icon-btn" title="Settings" aria-label="Settings">${ICON.settings}</button>
           <button id="ytm-close-btn" class="ytm-icon-btn" title="Close" aria-label="Close dialog">${ICON.close}</button>
@@ -2415,11 +2907,37 @@
 
     // Import dialog
 
-    _openImportModal(prefillUrl = '') {
-      this._buildImportBody();
+    _openImportModal(prefillUrl = '', mode = null) {
       const modal = document.getElementById('ytm-import-modal');
       if (!modal) return;
+
+      const spInfo = prefillUrl ? parseSpotifyUrl(prefillUrl) : null;
+      const targetMode = mode || (spInfo ? 'spotify' : 'youtube');
+
+      // Preserve live UI if conversion is currently running unless explicitly finished
+      if (this._spotifyState.isConverting) {
+        modal.classList.add('open');
+        this._setImportMode('spotify');
+        return;
+      }
+
+      this._buildImportBody(targetMode);
       modal.classList.add('open');
+
+      if (targetMode === 'spotify') {
+        const spInput = document.getElementById('ytm-spotify-url-input');
+        const spClear = document.getElementById('ytm-spotify-url-clear');
+        if (spInput) {
+          if (prefillUrl) {
+            spInput.value = prefillUrl;
+            spClear?.classList.remove('hidden');
+            this._loadSpotifyUrl();
+          } else {
+            setTimeout(() => spInput.focus(), 80);
+          }
+        }
+        return;
+      }
 
       const urlInput = document.getElementById('ytm-import-url-input');
       if (urlInput) {
@@ -2433,33 +2951,142 @@
     },
 
     _closeImportModal() {
+      if (this._spotifyState.isConverting) {
+        this._toast('Conversion in progress. Click Stop first to cancel.');
+        return;
+      }
       if (this._importAbortController) {
         this._importAbortController.abort();
         this._importAbortController = null;
       }
+      if (this._fixAbortController) {
+        this._fixAbortController.abort();
+        this._fixAbortController = null;
+      }
+      if (this._spotifyState.abortController) {
+        this._spotifyState.abortController.abort();
+        this._spotifyState.abortController = null;
+      }
       document.getElementById('ytm-import-modal')?.classList.remove('open');
     },
 
-    _buildImportBody() {
+    _setImportMode(mode) {
+      if (this._spotifyState.isConverting && mode !== 'spotify') {
+        this._toast('Wait for conversion to finish or click Stop first.');
+        return;
+      }
+      this._importMode = mode === 'spotify' ? 'spotify' : 'youtube';
+
+      const modal = document.getElementById('ytm-import-modal');
+      const logoEl = document.getElementById('ytm-import-modal-logo');
+      const titleEl = document.getElementById('ytm-import-modal-title');
+      const ytPane = document.getElementById('ytm-import-pane-youtube');
+      const spPane = document.getElementById('ytm-import-pane-spotify');
+
+      modal?.classList.toggle('ytm-import-modal-spotify', this._importMode === 'spotify');
+      if (logoEl) logoEl.innerHTML = this._importMode === 'spotify' ? ICON.spotify : ICON.import;
+      if (titleEl) titleEl.textContent = this._importMode === 'spotify' ? 'Spotify to YouTube Music' : 'Import Playlist from URL';
+
+      ytPane?.classList.toggle('hidden', this._importMode !== 'youtube');
+      spPane?.classList.toggle('hidden', this._importMode !== 'spotify');
+
+      document.querySelectorAll('#ytm-import-modal .ytm-import-tab').forEach(tab => {
+        const isActive = tab.dataset.importMode === this._importMode;
+        tab.classList.toggle('active', isActive);
+        tab.setAttribute('aria-selected', isActive ? 'true' : 'false');
+      });
+    },
+
+    _buildImportBody(initialMode = 'youtube') {
       const body = document.getElementById('ytm-import-body');
       if (!body) return;
 
+      this._spotifyTracksData = [];
+      this._spotifySelectedIndices = new Set();
+      this._spotifyState = {
+        ...this._spotifyState,
+        isConverting: false,
+        stopRequested: false,
+        abortController: null,
+        importedData: null,
+        fetchedUrl: '',
+        sourceKind: null,
+        isHelpOpen: false,
+      };
+
       body.innerHTML = `
-        <div class="ytm-import-input-section">
-          <p class="ytm-field-label">YouTube or YouTube Music URL</p>
-          <div class="ytm-import-bar">
-            <div class="ytm-import-input-wrap">
-              <span class="ytm-import-link-icon" aria-hidden="true">${ICON.link}</span>
-              <input type="text" id="ytm-import-url-input" class="ytm-text-input" placeholder="Paste YouTube / YTM playlist, album, or song URL…" autocomplete="off">
+        <div id="ytm-import-pane-youtube">
+          <div class="ytm-import-input-section">
+            <label class="ytm-field-label" for="ytm-import-url-input">YouTube or YouTube Music URL</label>
+            <div class="ytm-import-bar">
+              <div class="ytm-import-input-wrap">
+                <span class="ytm-import-link-icon" aria-hidden="true">${ICON.link}</span>
+                <input type="text" id="ytm-import-url-input" class="ytm-text-input" placeholder="Paste YouTube, YTM, or Spotify playlist URL…" autocomplete="off">
+              </div>
+              <button type="button" id="ytm-import-paste-btn" class="ytm-btn ytm-btn-secondary" title="Paste from clipboard">Paste</button>
+              <button type="button" id="ytm-import-fetch-btn" class="ytm-btn ytm-btn-primary">Fetch</button>
             </div>
-            <button id="ytm-import-paste-btn" class="ytm-btn ytm-btn-secondary" title="Paste from clipboard">Paste</button>
-            <button id="ytm-import-fetch-btn" class="ytm-btn ytm-btn-primary">Fetch</button>
+            <p class="ytm-field-hint">Supports YouTube & YouTube Music playlist, album, and track links. Spotify playlist links switch automatically.</p>
           </div>
-          <p class="ytm-field-hint">Supports YouTube & YouTube Music playlist links, album links, and video links with playlists.</p>
+          <div id="ytm-import-content" class="ytm-import-content"></div>
         </div>
-        <div id="ytm-import-content" class="ytm-import-content"></div>
+
+        <div id="ytm-import-pane-spotify" class="hidden">
+          <div class="ytm-import-input-section">
+            <label class="ytm-field-label" for="ytm-spotify-url-input">Spotify Playlist URL, ID, or JSON Backup</label>
+            <div class="ytm-import-bar">
+              <div class="ytm-import-input-wrap">
+                <span class="ytm-import-link-icon" aria-hidden="true">${ICON.spotify}</span>
+                <input type="text" id="ytm-spotify-url-input" class="ytm-text-input ytm-sp-input-pad" placeholder="Paste Spotify playlist URL or ID…" autocomplete="off">
+                <button type="button" class="ytm-sp-clear-btn hidden" id="ytm-spotify-url-clear" title="Clear URL" aria-label="Clear Spotify URL">${ICON.close}</button>
+              </div>
+              <button type="button" id="ytm-spotify-paste-btn" class="ytm-btn ytm-btn-secondary" title="Paste from clipboard">Paste</button>
+              <button type="button" id="ytm-spotify-fetch-btn" class="ytm-btn ytm-btn-primary">Fetch</button>
+            </div>
+
+            <div class="ytm-sp-upload-row">
+              <label for="ytm-spotify-file" class="ytm-sp-upload-btn" id="ytm-spotify-json-label" tabindex="0" role="button" aria-label="Upload Spotify JSON backup file">
+                ${ICON.upload}
+                <span>Or upload JSON backup</span>
+              </label>
+              <input type="file" id="ytm-spotify-file" accept=".json,application/json" class="hidden">
+
+              <div class="ytm-sp-pill hidden" id="ytm-spotify-pill">
+                <span class="ytm-sp-pill-icon" aria-hidden="true">${ICON.check}</span>
+                <span class="ytm-sp-pill-text" id="ytm-spotify-pill-text"></span>
+                <button type="button" class="ytm-sp-pill-remove" id="ytm-spotify-pill-remove" aria-label="Remove uploaded JSON file" title="Remove file">${ICON.close}</button>
+              </div>
+
+              <button type="button" class="ytm-sp-help-btn" id="ytm-spotify-help-toggle" aria-expanded="false">Export help</button>
+            </div>
+
+            <p class="ytm-field-hint">Playlist must be <strong>public</strong>. Converter prioritizes official YouTube Music studio tracks and lets you fix metadata before converting.</p>
+
+            <div class="ytm-sp-help-box hidden" id="ytm-spotify-help">
+              <strong>Alternative method if automatic fetching fails:</strong>
+              <ol>
+                <li>Open <a href="https://spotify-api-henna.vercel.app/" target="_blank" rel="noopener noreferrer">spotify-api-henna.vercel.app</a></li>
+                <li>Paste your Spotify playlist URL or ID, fetch it, and click <strong>Export All as JSON</strong></li>
+                <li>Upload the <code>.json</code> file using <strong>Or upload JSON backup</strong> above</li>
+              </ol>
+            </div>
+          </div>
+
+          <div class="ytm-sp-error hidden" id="ytm-spotify-error" role="alert">
+            <span aria-hidden="true" style="display:flex;flex-shrink:0;">${ICON.alert}</span>
+            <span id="ytm-spotify-error-text"></span>
+          </div>
+
+          <div id="ytm-spotify-content" class="ytm-import-content"></div>
+        </div>
       `;
 
+      // Wire modal tabs
+      document.querySelectorAll('#ytm-import-modal .ytm-import-tab').forEach(tab => {
+        tab.onclick = () => this._setImportMode(tab.dataset.importMode);
+      });
+
+      // Wire YouTube pane controls
       document.getElementById('ytm-import-paste-btn').onclick = async () => {
         try {
           if (navigator.clipboard?.readText) {
@@ -2489,6 +3116,91 @@
           this._fetchImportUrl();
         }
       });
+
+      // Wire Spotify pane controls
+      const spInput = document.getElementById('ytm-spotify-url-input');
+      const spClear = document.getElementById('ytm-spotify-url-clear');
+      const spFile  = document.getElementById('ytm-spotify-file');
+      const spJsonLabel = document.getElementById('ytm-spotify-json-label');
+      const spHelpToggle = document.getElementById('ytm-spotify-help-toggle');
+
+      document.getElementById('ytm-spotify-paste-btn').onclick = async () => {
+        if (this._spotifyState.isConverting) return;
+        try {
+          if (navigator.clipboard?.readText) {
+            const text = await navigator.clipboard.readText();
+            if (text && spInput && !spInput.disabled) {
+              spInput.value = text.trim();
+              spClear?.classList.toggle('hidden', !spInput.value);
+              this._loadSpotifyUrl();
+            }
+          } else {
+            this._toast('Clipboard access not supported. Please paste manually (Ctrl+V).');
+          }
+        } catch (_) {
+          this._toast('Could not read clipboard. Please paste manually (Ctrl+V).');
+        }
+      };
+
+      spInput?.addEventListener('input', () => {
+        const v = spInput.value.trim();
+        spClear?.classList.toggle('hidden', !v);
+        if (this._spotifyState.sourceKind === 'api' && v !== this._spotifyState.fetchedUrl) {
+          this._spotifyState.importedData = null;
+          this._spotifyState.fetchedUrl = '';
+          this._spotifyState.sourceKind = null;
+        }
+        this._spotifyClearError();
+      });
+
+      spInput?.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          this._loadSpotifyUrl();
+        }
+      });
+
+      spClear.onclick = () => {
+        if (this._spotifyState.isConverting) return;
+        if (spInput) spInput.value = '';
+        spClear.classList.add('hidden');
+        this._spotifyState.importedData = null;
+        this._spotifyState.fetchedUrl = '';
+        this._spotifyState.sourceKind = null;
+        this._spotifyTracksData = [];
+        this._spotifySelectedIndices = new Set();
+        const spContent = document.getElementById('ytm-spotify-content');
+        if (spContent) spContent.innerHTML = '';
+        this._spotifyClearError();
+        spInput?.focus();
+      };
+
+      document.getElementById('ytm-spotify-fetch-btn').onclick = () => {
+        this._loadSpotifyUrl();
+      };
+
+      spFile?.addEventListener('change', (e) => this._handleSpotifyFileUpload(e));
+      spJsonLabel?.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          spFile?.click();
+        }
+      });
+      document.getElementById('ytm-spotify-pill-remove').onclick = () => {
+        if (!this._spotifyState.isConverting) this._clearSpotifyFile();
+      };
+
+      spHelpToggle.onclick = () => {
+        const helpEl = document.getElementById('ytm-spotify-help');
+        if (!helpEl) return;
+        const open = !helpEl.classList.contains('hidden');
+        helpEl.classList.toggle('hidden', open);
+        this._spotifyState.isHelpOpen = !open;
+        spHelpToggle.textContent = open ? 'Export help' : 'Hide help';
+        spHelpToggle.setAttribute('aria-expanded', open ? 'false' : 'true');
+      };
+
+      this._setImportMode(initialMode);
     },
 
     async _fetchImportUrl() {
@@ -2499,6 +3211,19 @@
 
       if (!val) {
         content.innerHTML = `<div class="ytm-empty" style="padding:24px 0;"><div class="ytm-empty-icon">${ICON.alert}</div><div class="ytm-empty-text">Please enter a YouTube link or ID.</div></div>`;
+        return;
+      }
+
+      const spInfo = parseSpotifyUrl(val);
+      if (spInfo) {
+        this._setImportMode('spotify');
+        const spInput = document.getElementById('ytm-spotify-url-input');
+        const spClear = document.getElementById('ytm-spotify-url-clear');
+        if (spInput) {
+          spInput.value = val;
+          spClear?.classList.remove('hidden');
+        }
+        this._loadSpotifyUrl();
         return;
       }
 
@@ -2770,7 +3495,7 @@
       const progressBar  = document.getElementById('ytm-import-progress-bar');
       const progressText = document.getElementById('ytm-import-progress-text');
       const cancelBtn    = document.getElementById('ytm-import-cancel-btn');
-      const actionsBar   = document.querySelector('.ytm-import-actions-bar');
+      const actionsBar   = document.querySelector('#ytm-import-content .ytm-import-actions-bar');
       const trackListEl  = document.getElementById('ytm-import-track-list');
 
       if (progressWrap) progressWrap.classList.remove('hidden');
@@ -2844,7 +3569,7 @@
           }
 
           if (idx === 0 && targetCover) {
-            const heroThumb = document.querySelector('.ytm-import-thumb');
+            const heroThumb = document.querySelector('#ytm-import-content .ytm-import-thumb');
             if (heroThumb) heroThumb.src = targetCover;
             data.thumb = targetCover;
           }
@@ -2884,7 +3609,7 @@
       const progressBar  = document.getElementById('ytm-import-progress-bar');
       const progressText = document.getElementById('ytm-import-progress-text');
       const cancelBtn    = document.getElementById('ytm-import-cancel-btn');
-      const actionsBar   = document.querySelector('.ytm-import-actions-bar');
+      const actionsBar   = document.querySelector('#ytm-import-content .ytm-import-actions-bar');
 
       if (progressWrap) progressWrap.classList.remove('hidden');
       if (actionsBar) actionsBar.classList.add('hidden');
@@ -2993,19 +3718,1066 @@
       return { playlistId, imported, total: tracks.length };
     },
 
+    // Spotify converter
+
+    _spotifyShowError(msg) {
+      const box = document.getElementById('ytm-spotify-error');
+      const txt = document.getElementById('ytm-spotify-error-text');
+      if (txt) txt.textContent = msg;
+      box?.classList.remove('hidden');
+    },
+
+    _spotifyClearError() {
+      document.getElementById('ytm-spotify-error')?.classList.add('hidden');
+    },
+
+    _spotifyLog(msg, type = 'info') {
+      const log = document.getElementById('ytm-sp-log');
+      if (!log) return;
+      const line = document.createElement('div');
+      line.className = `ytm-sp-log-line ${type}`;
+      const dot = document.createElement('div');
+      dot.className = 'ytm-sp-log-dot';
+      const span = document.createElement('span');
+      span.className = 'ytm-sp-log-msg';
+      span.textContent = msg;
+      line.appendChild(dot);
+      line.appendChild(span);
+      log.appendChild(line);
+      log.scrollTop = log.scrollHeight;
+    },
+
+    _spotifyUpdateProgress(percent) {
+      const p = Math.max(0, Math.min(100, Math.round(percent)));
+      const fill = document.getElementById('ytm-sp-prog-fill');
+      const pct  = document.getElementById('ytm-sp-prog-pct');
+      const bar  = document.getElementById('ytm-sp-prog-bar');
+      if (fill) fill.style.width = `${p}%`;
+      if (pct) pct.textContent = `${p}%`;
+      bar?.setAttribute('aria-valuenow', String(p));
+    },
+
+    _spotifyUpdateStats(added, inLibrary, notFound) {
+      const nEl = document.getElementById('ytm-sp-stat-new');
+      const lEl = document.getElementById('ytm-sp-stat-lib');
+      const mEl = document.getElementById('ytm-sp-stat-miss');
+      if (nEl) nEl.textContent = String(added);
+      if (lEl) lEl.textContent = String(inLibrary);
+      if (mEl) mEl.textContent = String(notFound);
+    },
+
+    _spotifySetStatus(text) {
+      const txt = document.getElementById('ytm-sp-status-txt');
+      if (txt) txt.textContent = text;
+    },
+
+    _renderSpotifyPreview(data) {
+      const content = document.getElementById('ytm-spotify-content');
+      if (!content || !data) return;
+
+      const tracks = Array.isArray(data.tracks) ? data.tracks : [];
+      if (!tracks.length) {
+        this._spotifyTracksData = [];
+        this._spotifySelectedIndices = new Set();
+        content.innerHTML = `
+          <div class="ytm-empty" style="padding:24px 0;">
+            <div class="ytm-empty-icon">${ICON.music}</div>
+            <div class="ytm-empty-text">No tracks found in this Spotify playlist.</div>
+          </div>
+        `;
+        return;
+      }
+
+      this._spotifyTracksData = tracks;
+      this._spotifySelectedIndices = new Set(tracks.map((_, i) => i));
+
+      const totalSec = tracks.reduce((acc, t) => acc + (t.duration_ms > 0 ? Math.round(t.duration_ms / 1000) : 0), 0);
+      const totalDurStr = totalSec > 0 ? fmtDuration(totalSec) : '';
+      const thumb = data.image || tracks.find(t => t.cover_url)?.cover_url || '';
+      const owner = data.owner || '';
+      const totalCount = data.total || tracks.length;
+
+      content.innerHTML = `
+        <div class="ytm-import-card" id="ytm-spotify-preview">
+          <div class="ytm-import-hero">
+            <div id="ytm-spotify-prev-art">
+              ${thumb
+                ? `<img class="ytm-import-thumb" src="${esc(thumb)}" alt="" onerror="this.remove()">`
+                : `<div class="ytm-sp-thumb-placeholder" aria-hidden="true">${ICON.spotify}</div>`
+              }
+            </div>
+            <div class="ytm-import-info">
+              <label class="ytm-field-label" for="ytm-spotify-title-input">Playlist Title (editable)</label>
+              <input type="text" id="ytm-spotify-title-input" class="ytm-text-input ytm-import-title-input" value="${esc(data.title || 'Spotify Import')}">
+              <div class="ytm-import-sub">
+                ${owner ? `<span class="ytm-import-owner" id="ytm-spotify-prev-owner">${esc(owner)}</span><span class="ytm-dot">·</span>` : `<span class="ytm-import-owner hidden" id="ytm-spotify-prev-owner"></span>`}
+                <span class="ytm-import-count" id="ytm-spotify-prev-count">${totalCount} tracks</span>
+                ${totalDurStr ? `<span class="ytm-dot">·</span><span class="ytm-import-dur">${totalDurStr}</span>` : ''}
+                <span class="ytm-dot">·</span>
+                <span class="ytm-sp-priority-badge">${ICON.music} Studio Priority</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="ytm-import-actions-bar" id="ytm-sp-actions-bar">
+            <label class="ytm-checkbox-label" for="ytm-spotify-select-all">
+              <input type="checkbox" id="ytm-spotify-select-all" checked>
+              <span>Select All (<span id="ytm-sp-selected-count">${tracks.length}</span>)</span>
+            </label>
+            <div class="ytm-import-action-buttons">
+              <button type="button" id="ytm-sp-fix-btn" class="ytm-btn ytm-btn-secondary" title="Fix artist, song title & fetch album cover art via iTunes/Deezer">
+                ${ICON.wand} <span id="ytm-sp-fix-label">Fix All Metadata</span>
+              </button>
+              <button type="button" id="ytm-sp-convert" class="ytm-btn ytm-btn-primary">
+                ${ICON.heart} <span id="ytm-sp-convert-label">Convert & Import</span>
+              </button>
+            </div>
+          </div>
+
+          <div id="ytm-sp-fix-progress-wrap" class="ytm-import-progress-wrap hidden">
+            <div class="ytm-progress-bar-bg">
+              <div id="ytm-sp-fix-progress-bar" class="ytm-progress-bar-fill" style="width: 0%;"></div>
+            </div>
+            <div class="ytm-import-progress-status">
+              <span id="ytm-sp-fix-progress-text">Fixing metadata…</span>
+              <button type="button" id="ytm-sp-cancel-fix-btn" class="ytm-btn ytm-btn-danger ytm-btn-sm">Cancel</button>
+            </div>
+          </div>
+
+          <div id="ytm-spotify-progress-card" class="ytm-import-progress-wrap hidden">
+            <div class="ytm-sp-prog-hdr">
+              <span class="ytm-sp-prog-label" id="ytm-sp-prog-label">Matching studio tracks on YouTube Music…</span>
+              <div style="display:flex;align-items:center;gap:10px;">
+                <span class="ytm-sp-prog-pct" id="ytm-sp-prog-pct">0%</span>
+                <button type="button" id="ytm-sp-stop" class="ytm-btn ytm-btn-danger ytm-btn-sm">Stop</button>
+              </div>
+            </div>
+            <div class="ytm-progress-bar-bg" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="ytm-sp-prog-bar">
+              <div class="ytm-progress-bar-fill" id="ytm-sp-prog-fill" style="width: 0%;"></div>
+            </div>
+            <div class="ytm-sp-stats">
+              <div class="ytm-sp-stat green">
+                <div class="ytm-sp-stat-val" id="ytm-sp-stat-new">0</div>
+                <div class="ytm-sp-stat-lbl">Added</div>
+              </div>
+              <div class="ytm-sp-stat amber">
+                <div class="ytm-sp-stat-val" id="ytm-sp-stat-lib">0</div>
+                <div class="ytm-sp-stat-lbl">In Library</div>
+              </div>
+              <div class="ytm-sp-stat red">
+                <div class="ytm-sp-stat-val" id="ytm-sp-stat-miss">0</div>
+                <div class="ytm-sp-stat-lbl">Not Found</div>
+              </div>
+            </div>
+            <div class="ytm-sp-log-card">
+              <div class="ytm-sp-log-hdr" id="ytm-sp-status-txt">Ready</div>
+              <div class="ytm-sp-log-wrap" id="ytm-sp-log" role="log" aria-live="polite"></div>
+            </div>
+          </div>
+
+          <div class="ytm-import-track-list" id="ytm-sp-track-list">
+            ${tracks.map((t, idx) => {
+              const dur = t.duration_ms > 0 ? fmtDuration(Math.round(t.duration_ms / 1000)) : '';
+              const sub = t.album ? `${t.artist || 'Unknown Artist'} · ${t.album}` : (t.artist || 'Unknown Artist');
+              return `
+                <div class="ytm-import-track-row" data-idx="${idx}">
+                  <input type="checkbox" class="ytm-sp-track-chk" data-idx="${idx}" aria-label="Select ${esc(t.title)}" checked>
+                  <span class="ytm-import-track-num">${idx + 1}</span>
+                  ${t.cover_url
+                    ? `<img class="ytm-import-track-thumb" src="${esc(t.cover_url)}" alt="" loading="lazy" onerror="this.style.display='none'">`
+                    : `<div class="ytm-sp-row-art-fallback" aria-hidden="true">${ICON.music}</div>`
+                  }
+                  <div class="ytm-import-track-meta">
+                    <div class="ytm-import-track-title">${esc(t.title)}</div>
+                    <div class="ytm-import-track-sub">${esc(sub)}</div>
+                  </div>
+                  ${dur ? `<div class="ytm-import-track-dur">${esc(dur)}</div>` : ''}
+                </div>
+              `;
+            }).join('')}
+          </div>
+        </div>
+      `;
+
+      const titleInput = document.getElementById('ytm-spotify-title-input');
+      titleInput?.addEventListener('input', () => {
+        titleInput.dataset.userEdited = '1';
+      });
+
+      const selectAllEl = document.getElementById('ytm-spotify-select-all');
+      selectAllEl.onchange = (e) => {
+        if (this._spotifyState.isConverting) {
+          e.target.checked = !e.target.checked;
+          return;
+        }
+        const checked = e.target.checked;
+        content.querySelectorAll('.ytm-sp-track-chk').forEach(c => {
+          c.checked = checked;
+          const idx = parseInt(c.dataset.idx, 10);
+          if (checked) this._spotifySelectedIndices.add(idx);
+          else this._spotifySelectedIndices.delete(idx);
+        });
+        this._updateSpotifySelectedCount(tracks.length);
+      };
+
+      content.querySelectorAll('.ytm-sp-track-chk').forEach(c => {
+        c.onchange = () => {
+          if (this._spotifyState.isConverting) {
+            c.checked = !c.checked;
+            return;
+          }
+          const idx = parseInt(c.dataset.idx, 10);
+          if (c.checked) this._spotifySelectedIndices.add(idx);
+          else this._spotifySelectedIndices.delete(idx);
+          if (selectAllEl) selectAllEl.checked = this._spotifySelectedIndices.size === tracks.length;
+          this._updateSpotifySelectedCount(tracks.length);
+        };
+      });
+
+      document.getElementById('ytm-sp-fix-btn').onclick = () => this._fixSpotifyMetadata();
+      document.getElementById('ytm-sp-convert').onclick = () => this._startSpotifyConversion();
+      document.getElementById('ytm-sp-stop').onclick = () => this._stopSpotifyConversion();
+
+      this._updateSpotifySelectedCount(tracks.length);
+    },
+
+    _showSpotifyPreview(data) {
+      this._renderSpotifyPreview(data);
+    },
+
+    _updateSpotifySelectedCount(total) {
+      const selSize = this._spotifySelectedIndices.size;
+      const countEl = document.getElementById('ytm-sp-selected-count');
+      const fixBtn = document.getElementById('ytm-sp-fix-btn');
+      const fixLabel = document.getElementById('ytm-sp-fix-label');
+      const convBtn = document.getElementById('ytm-sp-convert');
+      const convLabel = document.getElementById('ytm-sp-convert-label');
+      const disabled = selSize === 0;
+
+      if (countEl) countEl.textContent = String(selSize);
+      if (fixBtn) fixBtn.disabled = disabled;
+      if (convBtn) convBtn.disabled = disabled;
+      if (fixLabel) {
+        fixLabel.textContent = (selSize === total || selSize === 0) ? 'Fix All Metadata' : `Fix Selected (${selSize})`;
+      }
+      if (convLabel) {
+        convLabel.textContent = (selSize === total || selSize === 0) ? 'Convert & Import' : `Convert Selected (${selSize})`;
+      }
+    },
+
+    async _fixSpotifyMetadata() {
+      if (this._spotifyState.isConverting || this._fixAbortController) return;
+      const data = this._spotifyState.importedData;
+      const selectedIndices = Array.from(this._spotifySelectedIndices).sort((a, b) => a - b);
+      if (!data || !selectedIndices.length) {
+        this._toast('No tracks selected to fix');
+        return;
+      }
+
+      const actionsBar   = document.getElementById('ytm-sp-actions-bar');
+      const progressWrap = document.getElementById('ytm-sp-fix-progress-wrap');
+      const progressBar  = document.getElementById('ytm-sp-fix-progress-bar');
+      const progressText = document.getElementById('ytm-sp-fix-progress-text');
+      const cancelBtn    = document.getElementById('ytm-sp-cancel-fix-btn');
+      const trackListEl  = document.getElementById('ytm-sp-track-list');
+      const fetchBtn     = document.getElementById('ytm-spotify-fetch-btn');
+      const pasteBtn     = document.getElementById('ytm-spotify-paste-btn');
+
+      progressWrap?.classList.remove('hidden');
+      actionsBar?.classList.add('hidden');
+      cancelBtn?.classList.remove('hidden');
+      if (fetchBtn) fetchBtn.disabled = true;
+      if (pasteBtn) pasteBtn.disabled = true;
+      document.querySelectorAll('#ytm-import-modal .ytm-import-tab').forEach(t => { t.disabled = true; });
+      document.querySelectorAll('#ytm-sp-track-list .ytm-sp-track-chk, #ytm-spotify-select-all').forEach(c => { c.disabled = true; });
+
+      this._fixAbortController = new AbortController();
+      const signal = this._fixAbortController.signal;
+      if (cancelBtn) {
+        cancelBtn.onclick = () => {
+          this._fixAbortController?.abort();
+        };
+      }
+
+      let fixedCount = 0;
+      const total = selectedIndices.length;
+
+      try {
+        for (let i = 0; i < total; i++) {
+          if (signal.aborted) {
+            throw new DOMException('Metadata fix stopped by user', 'AbortError');
+          }
+
+          const idx = selectedIndices[i];
+          const t = data.tracks[idx];
+          if (!t) continue;
+
+          const pct = Math.round(((i + 1) / total) * 100);
+          if (progressBar) progressBar.style.width = `${pct}%`;
+          if (progressText) progressText.textContent = `Fixing ${i + 1}/${total}: "${t.title}"…`;
+
+          // Strip remaster/edition noise while keeping main artist intact
+          const origTitle = t.title;
+          const origArtist = t.artist;
+          const baseTitle = buildSpotifySearchQuery(t.title, '');
+          const cleaned = cleanTitleAndArtist(baseTitle || t.title, t.artist, 'MUSIC_PAGE_TYPE_ARTIST', false);
+          let targetTitle = cleaned.title;
+          let targetArtist = cleaned.artist;
+          let targetAlbum = t.album || '';
+          let targetCover = t.cover_url || null;
+
+          const primaryArtist = (targetArtist && !/^(unknown|unknown artist|various)$/i.test(targetArtist))
+            ? targetArtist.split(',')[0].trim()
+            : '';
+
+          let canonical = null;
+          try {
+            canonical = await fetchCanonicalMetadata(targetTitle, primaryArtist, (u, o) => this._apiFetch(u, signal ? { ...o, signal } : o));
+          } catch (_) {}
+
+          if (signal.aborted) {
+            throw new DOMException('Metadata fix stopped by user', 'AbortError');
+          }
+
+          if (canonical) {
+            if (canonical.title) targetTitle = canonical.title;
+            if (canonical.artist) targetArtist = canonical.artist;
+            if (canonical.album) targetAlbum = canonical.album;
+            if (canonical.thumb) targetCover = canonical.thumb;
+          }
+
+          const wasUpdated = Boolean(canonical) || targetTitle !== origTitle || targetArtist !== origArtist;
+          if (!wasUpdated) continue;
+
+          t.title = targetTitle;
+          t.artist = targetArtist;
+          if (targetAlbum) t.album = targetAlbum;
+          if (targetCover) t.cover_url = targetCover;
+
+          if (trackListEl) {
+            const row = trackListEl.querySelector(`.ytm-import-track-row[data-idx="${idx}"]`);
+            if (row) {
+              const titleEl = row.querySelector('.ytm-import-track-title');
+              const artistEl = row.querySelector('.ytm-import-track-sub');
+              if (titleEl) {
+                titleEl.innerHTML = `${esc(targetTitle)} <span class="ytm-meta-fixed-pill">Fixed</span>`;
+              }
+              if (artistEl) {
+                artistEl.textContent = targetAlbum ? `${targetArtist} · ${targetAlbum}` : targetArtist;
+              }
+              if (targetCover) {
+                const imgEl = row.querySelector('.ytm-import-track-thumb');
+                if (imgEl) {
+                  imgEl.src = targetCover;
+                } else {
+                  const ph = row.querySelector('.ytm-sp-row-art-fallback');
+                  if (ph) {
+                    const img = document.createElement('img');
+                    img.className = 'ytm-import-track-thumb';
+                    img.src = targetCover;
+                    img.alt = '';
+                    img.loading = 'lazy';
+                    img.onerror = function () { this.style.display = 'none'; };
+                    ph.replaceWith(img);
+                  }
+                }
+              }
+            }
+          }
+
+          if (!data.image && targetCover) {
+            const artWrap = document.getElementById('ytm-spotify-prev-art');
+            if (artWrap && !artWrap.querySelector('img')) {
+              artWrap.innerHTML = `<img class="ytm-import-thumb" src="${esc(targetCover)}" alt="" onerror="this.remove()">`;
+              data.image = targetCover;
+            }
+          }
+
+          fixedCount++;
+        }
+
+        this._toast(fixedCount > 0 ? `Fixed metadata for ${fixedCount} track${fixedCount === 1 ? '' : 's'}!` : 'No metadata updates found for selected tracks');
+      } catch (err) {
+        if (err.name === 'AbortError') {
+          this._toast('Metadata fix cancelled');
+        } else {
+          console.error(`${PLUGIN_LABEL} Spotify metadata fix error:`, err);
+          this._toast(`Metadata fix error: ${err.message}`);
+        }
+      } finally {
+        this._fixAbortController = null;
+        progressWrap?.classList.add('hidden');
+        actionsBar?.classList.remove('hidden');
+        if (progressBar) progressBar.style.width = '0%';
+        if (fetchBtn) fetchBtn.disabled = false;
+        if (pasteBtn) pasteBtn.disabled = false;
+        document.querySelectorAll('#ytm-import-modal .ytm-import-tab').forEach(t => { t.disabled = false; });
+        document.querySelectorAll('#ytm-sp-track-list .ytm-sp-track-chk, #ytm-spotify-select-all').forEach(c => { c.disabled = false; });
+      }
+    },
+
+    _handleSpotifyFileUpload(event) {
+      const file = event?.target?.files?.[0];
+      if (!file) return;
+      this._spotifyClearError();
+
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const json = JSON.parse(e.target.result);
+          const playlistData = normalizeSpotifyJson(json);
+          this._spotifyState.importedData = playlistData;
+          this._spotifyState.fetchedUrl = '';
+          this._spotifyState.sourceKind = 'json';
+
+          const pillText = document.getElementById('ytm-spotify-pill-text');
+          const pill = document.getElementById('ytm-spotify-pill');
+          const jsonLabel = document.getElementById('ytm-spotify-json-label');
+          const urlInput = document.getElementById('ytm-spotify-url-input');
+          const clearBtn = document.getElementById('ytm-spotify-url-clear');
+
+          if (pillText) pillText.textContent = `${playlistData.tracks.length} tracks · ${file.name}`;
+          pill?.classList.remove('hidden');
+          jsonLabel?.classList.add('hidden');
+          if (urlInput) {
+            urlInput.value = '';
+            urlInput.placeholder = 'Using uploaded JSON backup';
+            urlInput.disabled = true;
+          }
+          clearBtn?.classList.add('hidden');
+
+          this._renderSpotifyPreview(playlistData);
+        } catch (err) {
+          console.error(`${PLUGIN_LABEL} JSON import parse error:`, err);
+          this._spotifyShowError(`Could not parse JSON file: ${err.message}`);
+          if (event?.target) event.target.value = '';
+        }
+      };
+      reader.readAsText(file);
+    },
+
+    _clearSpotifyFile() {
+      this._spotifyState.importedData = null;
+      this._spotifyState.fetchedUrl = '';
+      this._spotifyState.sourceKind = null;
+      this._spotifyTracksData = [];
+      this._spotifySelectedIndices = new Set();
+
+      const fileEl = document.getElementById('ytm-spotify-file');
+      const urlEl = document.getElementById('ytm-spotify-url-input');
+      const pill = document.getElementById('ytm-spotify-pill');
+      const jsonLabel = document.getElementById('ytm-spotify-json-label');
+      const spContent = document.getElementById('ytm-spotify-content');
+
+      if (fileEl) fileEl.value = '';
+      if (urlEl) {
+        urlEl.value = '';
+        urlEl.disabled = false;
+        urlEl.placeholder = 'Paste Spotify playlist URL or ID…';
+      }
+      if (spContent) spContent.innerHTML = '';
+      document.getElementById('ytm-spotify-url-clear')?.classList.add('hidden');
+      pill?.classList.add('hidden');
+      jsonLabel?.classList.remove('hidden');
+      this._spotifyClearError();
+    },
+
+    async _loadSpotifyUrl() {
+      const input = document.getElementById('ytm-spotify-url-input');
+      const fetchBtn = document.getElementById('ytm-spotify-fetch-btn');
+      const content = document.getElementById('ytm-spotify-content');
+      const rawUrl = input?.value.trim();
+
+      this._spotifyClearError();
+      if (!rawUrl) {
+        this._spotifyShowError('Enter a public Spotify playlist URL or ID.');
+        return null;
+      }
+
+      const parsed = parseSpotifyUrl(rawUrl, true);
+      if (!parsed) {
+        this._spotifyShowError('Unrecognized Spotify URL or ID. Paste a link like open.spotify.com/playlist/... or a playlist ID.');
+        return null;
+      }
+      if (parsed.type === 'spotify-unsupported') {
+        this._spotifyShowError('Only Spotify playlist links are supported. Albums and single tracks are not supported.');
+        return null;
+      }
+
+      if (this._spotifyState.abortController) {
+        this._spotifyState.abortController.abort();
+      }
+      const controller = new AbortController();
+      this._spotifyState.abortController = controller;
+
+      if (fetchBtn) {
+        fetchBtn.disabled = true;
+        fetchBtn.textContent = 'Fetching…';
+      }
+      if (content) {
+        content.innerHTML = `
+          <div class="ytm-empty" style="padding:32px 0;">
+            <div class="ytm-empty-icon ytm-spin">${ICON.sync}</div>
+            <div class="ytm-empty-text" id="ytm-sp-fetch-status">Connecting to Spotify…</div>
+          </div>
+        `;
+      }
+
+      try {
+        const playlistData = await fetchSpotifyPlaylistFromAPI(
+          parsed.playlistId,
+          (u, o) => this._apiFetch(u, o),
+          {
+            signal: controller.signal,
+            onPage: (partial) => {
+              const statusEl = document.getElementById('ytm-sp-fetch-status');
+              if (statusEl) {
+                const totalTxt = partial.total ? ` of ${partial.total}` : '';
+                statusEl.textContent = `Loaded ${partial.tracks.length}${totalTxt} tracks…`;
+              }
+            },
+          }
+        );
+
+        this._spotifyState.importedData = playlistData;
+        this._spotifyState.fetchedUrl = rawUrl;
+        this._spotifyState.sourceKind = 'api';
+        this._renderSpotifyPreview(playlistData);
+        return playlistData;
+      } catch (err) {
+        if (err.name === 'AbortError') return null;
+        console.error(`${PLUGIN_LABEL} Spotify fetch error:`, err);
+        if (content) {
+          content.innerHTML = `
+            <div class="ytm-empty" style="padding:24px 0;">
+              <div class="ytm-empty-icon">${ICON.alert}</div>
+              <div class="ytm-empty-text">Failed to fetch playlist: ${esc(err.message)}</div>
+            </div>
+          `;
+        }
+        return null;
+      } finally {
+        if (this._spotifyState.abortController === controller) {
+          this._spotifyState.abortController = null;
+        }
+        if (fetchBtn) {
+          fetchBtn.disabled = false;
+          fetchBtn.textContent = 'Fetch';
+        }
+      }
+    },
+
+    async _getLibraryIndex() {
+      const map = new Map();
+      if (typeof this.api?.library?.getTracks === 'function') {
+        try {
+          const tracks = await this.api.library.getTracks();
+          if (Array.isArray(tracks)) {
+            for (const t of tracks) {
+              if (t?.source_type && t?.external_id && t.id != null) {
+                map.set(`${t.source_type}:${t.external_id}`, t.id);
+                if (t.source_type === SOURCE_TYPE) {
+                  this.libraryIds.add(t.external_id);
+                }
+              }
+            }
+          }
+        } catch (err) {
+          console.warn(`${PLUGIN_LABEL} getLibraryIndex failed:`, err);
+        }
+      }
+      return map;
+    },
+
+    async _matchSpotifyTrackToYtm(spotifyTrack, signal) {
+      if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+      const query = buildSpotifySearchQuery(spotifyTrack?.title, spotifyTrack?.artist);
+      if (!query) return null;
+
+      const preferStudio = this.config?.preferStudioAudio !== false;
+
+      const abortSafeFetch = async (u, o = {}) => {
+        if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+        const res = await this._apiFetch(u, signal ? { ...o, signal } : o);
+        if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+        return res;
+      };
+
+      const collectCandidates = (sections, seenIds) => {
+        const list = [];
+        for (const sec of (sections || [])) {
+          if (sec.item?.videoId && !seenIds.has(sec.item.videoId)) {
+            seenIds.add(sec.item.videoId);
+            list.push(sec.item);
+          }
+          for (const item of (sec.items || [])) {
+            if (item?.videoId && !seenIds.has(item.videoId)) {
+              seenIds.add(item.videoId);
+              list.push(item);
+            }
+          }
+        }
+        return list;
+      };
+
+      const seenIds = new Set();
+      let bestSongCandidate = null;
+      let bestSongScore = -Infinity;
+      let bestAnyCandidate = null;
+      let bestAnyScore = -Infinity;
+
+      const evalCandidates = (items) => {
+        for (const cand of items) {
+          const sc = scoreYtmCandidate(spotifyTrack, cand);
+          if (sc > bestAnyScore) {
+            bestAnyScore = sc;
+            bestAnyCandidate = cand;
+          }
+          if (cand.isSong && !cand.isVideo && sc > bestSongScore) {
+            bestSongScore = sc;
+            bestSongCandidate = cand;
+          }
+        }
+      };
+
+      const songsSections = await API.search(query, abortSafeFetch, 'songs');
+      const songCandidates = collectCandidates(songsSections, seenIds);
+      evalCandidates(songCandidates);
+
+      // Broad fallback search only when studio songs search found no strong match
+      if (songCandidates.length === 0 || bestSongScore < 25) {
+        if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+        const allSections = await API.search(query, abortSafeFetch, null);
+        const fallbackCandidates = collectCandidates(allSections, seenIds);
+        evalCandidates(fallbackCandidates);
+      }
+
+      if (preferStudio && bestSongCandidate && bestSongScore >= 15) {
+        return bestSongCandidate;
+      }
+      if (bestAnyCandidate && bestAnyScore >= 15) {
+        return bestAnyCandidate;
+      }
+      return null;
+    },
+
+    _setSpotifyRowResult(rowIdx, statusKind, coverUrl) {
+      const row = document.querySelector(`#ytm-sp-track-list .ytm-import-track-row[data-idx="${rowIdx}"]`);
+      if (!row) return;
+      const titleEl = row.querySelector('.ytm-import-track-title');
+      if (titleEl) {
+        titleEl.querySelectorAll('.ytm-sp-row-badge').forEach(b => b.remove());
+        const badge = document.createElement('span');
+        badge.className = `ytm-sp-row-badge ${statusKind}`;
+        badge.textContent = statusKind === 'added' ? 'Added' : statusKind === 'lib' ? 'In Library' : 'Not Found';
+        titleEl.appendChild(badge);
+      }
+      if (coverUrl) {
+        const imgEl = row.querySelector('.ytm-import-track-thumb');
+        if (imgEl) {
+          imgEl.src = coverUrl;
+        } else {
+          const ph = row.querySelector('.ytm-sp-row-art-fallback');
+          if (ph) {
+            const img = document.createElement('img');
+            img.className = 'ytm-import-track-thumb';
+            img.src = coverUrl;
+            img.alt = '';
+            img.loading = 'lazy';
+            img.onerror = function () { this.style.display = 'none'; };
+            ph.replaceWith(img);
+          }
+        }
+      }
+    },
+
+    async _startSpotifyConversion() {
+      if (this._spotifyState.isConverting) return;
+      if (this._fixAbortController) {
+        this._fixAbortController.abort();
+      }
+
+      const urlEl = document.getElementById('ytm-spotify-url-input');
+      const actionsBar = document.getElementById('ytm-sp-actions-bar');
+      const convertBtn = document.getElementById('ytm-sp-convert');
+      const fixBtn = document.getElementById('ytm-sp-fix-btn');
+      const stopBtn = document.getElementById('ytm-sp-stop');
+      const fetchBtn = document.getElementById('ytm-spotify-fetch-btn');
+      const pasteBtn = document.getElementById('ytm-spotify-paste-btn');
+      const progressCard = document.getElementById('ytm-spotify-progress-card');
+      const progLabel = document.getElementById('ytm-sp-prog-label');
+      const logWrap = document.getElementById('ytm-sp-log');
+
+      this._spotifyClearError();
+
+      let playlistData = null;
+      const rawUrl = urlEl?.value.trim() || '';
+
+      if (
+        this._spotifyState.importedData &&
+        (this._spotifyState.sourceKind === 'json' || (this._spotifyState.sourceKind === 'api' && rawUrl === this._spotifyState.fetchedUrl))
+      ) {
+        playlistData = this._spotifyState.importedData;
+      } else {
+        const parsed = parseSpotifyUrl(rawUrl, true);
+        if (!parsed || parsed.type !== 'spotify-playlist') {
+          const msg = parsed?.type === 'spotify-unsupported'
+            ? 'Only Spotify playlist links or JSON exports are supported.'
+            : 'Enter a valid Spotify playlist URL, ID, or upload a JSON export.';
+          this._spotifyShowError(msg);
+          this._spotifySetStatus('Invalid input');
+          return;
+        }
+        playlistData = await this._loadSpotifyUrl();
+        if (!playlistData) return;
+      }
+
+      if (!playlistData.tracks || !playlistData.tracks.length) {
+        this._spotifyShowError('This playlist contains no tracks to convert.');
+        return;
+      }
+
+      const selectedItems = playlistData.tracks
+        .map((track, rowIdx) => ({ track, rowIdx }))
+        .filter(item => this._spotifySelectedIndices.has(item.rowIdx));
+
+      if (!selectedItems.length) {
+        this._toast('Please select at least one track to convert');
+        return;
+      }
+
+      document.querySelectorAll('#ytm-sp-track-list .ytm-sp-row-badge').forEach(b => b.remove());
+
+      const titleInput = document.getElementById('ytm-spotify-title-input');
+      const playlistTitle = (titleInput?.value || playlistData.title || 'Spotify Import').trim();
+
+      this._spotifyState.isConverting = true;
+      this._spotifyState.stopRequested = false;
+      this._spotifyState.abortController = new AbortController();
+      const signal = this._spotifyState.abortController.signal;
+
+      if (progressCard) progressCard.classList.remove('hidden');
+      if (actionsBar) actionsBar.classList.add('hidden');
+      if (convertBtn) convertBtn.disabled = true;
+      if (fixBtn) fixBtn.disabled = true;
+      if (stopBtn) {
+        stopBtn.disabled = false;
+        stopBtn.classList.remove('hidden');
+      }
+      if (fetchBtn) fetchBtn.disabled = true;
+      if (pasteBtn) pasteBtn.disabled = true;
+      if (urlEl) urlEl.disabled = true;
+      document.querySelectorAll('#ytm-import-modal .ytm-import-tab').forEach(t => { t.disabled = true; });
+      document.querySelectorAll('#ytm-sp-track-list .ytm-sp-track-chk, #ytm-spotify-select-all').forEach(c => { c.disabled = true; });
+
+      this._spotifyUpdateProgress(0);
+      this._spotifyUpdateStats(0, 0, 0);
+      this._spotifySetStatus('Converting…');
+      if (progLabel) progLabel.textContent = 'Matching studio tracks on YouTube Music…';
+      if (logWrap) logWrap.innerHTML = '';
+
+      this._spotifyLog(`Playlist: ${playlistTitle}`, 'info');
+      this._spotifyLog(`${selectedItems.length} tracks selected (studio audio preferred)`, 'info');
+
+      try {
+        const existingTracks = await this._getLibraryIndex();
+        this._spotifyLog(`${existingTracks.size} existing tracks in library index`, 'info');
+
+        const total = selectedItems.length;
+        let processed = 0;
+        let successes = 0;
+        let fromLibrary = 0;
+        let notFound = 0;
+        const foundTracks = new Array(total).fill(null);
+        const inFlight = new Map();
+        const libraryWriteLocks = new Map();
+        const concurrency = 3;
+        const queue = selectedItems.map((item, idx) => ({ track: item.track, rowIdx: item.rowIdx, idx }));
+
+        const resolveAndSaveTrack = async (track) => {
+          await new Promise(r => setTimeout(r, 100 + Math.random() * 100));
+          if (this._spotifyState.stopRequested || signal.aborted) {
+            throw new DOMException('Aborted', 'AbortError');
+          }
+
+          const best = await this._matchSpotifyTrackToYtm(track, signal);
+          if (!best) return null;
+
+          const libraryKey = `${SOURCE_TYPE}:${best.videoId}`;
+          if (existingTracks.has(libraryKey)) {
+            return {
+              id: existingTracks.get(libraryKey),
+              isNew: false,
+              cover: best.thumb || track.cover_url || ytThumb(best.videoId, 'hqdefault'),
+              matchedTitle: best.title,
+            };
+          }
+
+          if (libraryWriteLocks.has(libraryKey)) {
+            const lockedId = await libraryWriteLocks.get(libraryKey);
+            return {
+              id: lockedId,
+              isNew: false,
+              cover: best.thumb || track.cover_url || ytThumb(best.videoId, 'hqdefault'),
+              matchedTitle: best.title,
+            };
+          }
+
+          const writePromise = (async () => {
+            const durSec = (best.duration && best.duration > 0)
+              ? best.duration
+              : (videoDurationCache.get(best.videoId) || (track.duration_ms > 0 ? Math.round(track.duration_ms / 1000) : null));
+            const cover = best.thumb || (best.videoId ? ytThumb(best.videoId, 'hqdefault') : null) || track.cover_url || null;
+            const resolvedArtist = (best.artist && best.artist !== 'Unknown Artist')
+              ? best.artist
+              : (best.albumArtist && best.albumArtist !== 'Unknown Artist' ? best.albumArtist : (track.artist || 'Unknown Artist'));
+
+            const newId = await this.api.library.addExternalTrack({
+              title:       best.title || track.title,
+              artist:      resolvedArtist,
+              album:       best.album || track.album || playlistTitle || null,
+              duration:    durSec || null,
+              cover_url:   cover,
+              source_type: SOURCE_TYPE,
+              external_id: best.videoId,
+              liked:       false,
+            });
+            if (newId != null) {
+              existingTracks.set(libraryKey, newId);
+              this.libraryIds.add(best.videoId);
+            }
+            return newId;
+          })();
+
+          libraryWriteLocks.set(libraryKey, writePromise);
+          let resolvedId;
+          try {
+            resolvedId = await writePromise;
+          } finally {
+            libraryWriteLocks.delete(libraryKey);
+          }
+
+          if (resolvedId == null) return null;
+          return {
+            id: resolvedId,
+            isNew: true,
+            cover: best.thumb || track.cover_url || ytThumb(best.videoId, 'hqdefault'),
+            matchedTitle: best.title,
+          };
+        };
+
+        const searchWorker = async () => {
+          while (queue.length > 0 && !this._spotifyState.stopRequested && !signal.aborted) {
+            const item = queue.shift();
+            if (!item) break;
+            const { track, rowIdx, idx } = item;
+            const cacheKey = `${normalizeMatchStr(track.title)}|${normalizeMatchStr(track.artist)}|${track.duration_ms || 0}`;
+            let trackId = null;
+            let cover = null;
+            let wasInLibrary = false;
+
+            const cached = this._spotifyTrackCache.get(cacheKey);
+            if (cached) {
+              trackId = cached.trackId;
+              cover = cached.cover || null;
+              wasInLibrary = true;
+              fromLibrary++;
+              this._setSpotifyRowResult(rowIdx, 'lib', cover);
+            } else if (inFlight.has(cacheKey)) {
+              try {
+                const res = await inFlight.get(cacheKey);
+                if (res && res.id != null) {
+                  trackId = res.id;
+                  cover = res.cover || null;
+                  wasInLibrary = !res.isNew;
+                  res.isNew ? successes++ : fromLibrary++;
+                  this._setSpotifyRowResult(rowIdx, res.isNew ? 'added' : 'lib', cover);
+                } else {
+                  notFound++;
+                  this._setSpotifyRowResult(rowIdx, 'miss', null);
+                }
+              } catch (err) {
+                if (err.name === 'AbortError') break;
+                notFound++;
+                this._setSpotifyRowResult(rowIdx, 'miss', null);
+              }
+            } else {
+              const p = resolveAndSaveTrack(track);
+              inFlight.set(cacheKey, p);
+              try {
+                const res = await p;
+                if (res && res.id != null) {
+                  trackId = res.id;
+                  cover = res.cover || null;
+                  wasInLibrary = !res.isNew;
+                  this._spotifyTrackCache.set(cacheKey, { trackId: res.id, cover: res.cover });
+                  res.isNew ? successes++ : fromLibrary++;
+                  this._setSpotifyRowResult(rowIdx, res.isNew ? 'added' : 'lib', cover);
+                } else {
+                  notFound++;
+                  this._setSpotifyRowResult(rowIdx, 'miss', null);
+                  this._spotifyLog(`No YouTube match: ${track.title} - ${track.artist}`, 'warn');
+                }
+              } catch (err) {
+                if (err.name === 'AbortError') break;
+                console.warn(`${PLUGIN_LABEL} Spotify track match failed for "${track.title}":`, err);
+                notFound++;
+                this._setSpotifyRowResult(rowIdx, 'miss', null);
+                this._spotifyLog(`Match error: ${track.title}`, 'error');
+              } finally {
+                inFlight.delete(cacheKey);
+              }
+            }
+
+            foundTracks[idx] = { track, trackId, cover, wasInLibrary, title: track.title };
+            processed++;
+
+            if (processed % 5 === 0 || processed === total) {
+              this._spotifyUpdateProgress((processed / total) * 50);
+              this._spotifyUpdateStats(successes, fromLibrary, notFound);
+              this._spotifyLog(`Matched ${processed}/${total}: ${successes} added, ${fromLibrary} in library, ${notFound} not found`, 'info');
+            }
+          }
+        };
+
+        const workers = [];
+        for (let i = 0; i < concurrency; i++) {
+          workers.push(searchWorker());
+        }
+        await Promise.all(workers);
+
+        const skipped = foundTracks.filter(e => e === null).length;
+
+        if (this._spotifyState.stopRequested || signal.aborted) {
+          this._spotifyLog(`Conversion stopped (${processed}/${total} processed).`, 'warn');
+          this._spotifySetStatus('Stopped');
+          if (progLabel) progLabel.textContent = 'Conversion stopped';
+          if (successes > 0 && typeof this.api?.library?.refresh === 'function') {
+            try { await this.api.library.refresh(); } catch (_) {}
+          }
+          return;
+        }
+
+        const matchedEntries = foundTracks.filter(e => e && e.trackId != null);
+        if (!matchedEntries.length) {
+          this._spotifyUpdateProgress(100);
+          this._spotifyUpdateStats(successes, fromLibrary, notFound);
+          this._spotifyLog('No matching tracks could be resolved on YouTube Music.', 'error');
+          this._spotifySetStatus('No matches found');
+          if (progLabel) progLabel.textContent = 'No matches found';
+          return;
+        }
+
+        if (progLabel) progLabel.textContent = 'Creating playlist and adding tracks…';
+        const coverThumb = playlistData.image || matchedEntries.find(e => e.cover)?.cover || null;
+        const audionPlaylistId = await this.api.library.createPlaylist(playlistTitle, coverThumb);
+        if (audionPlaylistId == null) {
+          throw new Error('Failed to create Audion playlist');
+        }
+        this._spotifyLog(`Created playlist "${playlistTitle}" (${matchedEntries.length} tracks)`, 'success');
+
+        for (let i = 0; i < matchedEntries.length; i++) {
+          if (this._spotifyState.stopRequested || signal.aborted) break;
+          const entry = matchedEntries[i];
+          try {
+            await new Promise(r => setTimeout(r, 40));
+            await this.api.library.addTrackToPlaylist(audionPlaylistId, entry.trackId);
+          } catch (err) {
+            this._spotifyLog(`Failed to add to playlist: ${entry.title}`, 'error');
+          }
+          this._spotifyUpdateProgress(50 + ((i + 1) / matchedEntries.length) * 50);
+        }
+
+        if (this._spotifyState.stopRequested || signal.aborted) {
+          this._spotifyLog('Playlist assembly stopped by user.', 'warn');
+          this._spotifySetStatus('Stopped');
+          if (progLabel) progLabel.textContent = 'Conversion stopped';
+          if (typeof this.api?.library?.refresh === 'function') {
+            try { await this.api.library.refresh(); } catch (_) {}
+          }
+          return;
+        }
+
+        this._spotifyUpdateProgress(100);
+        this._spotifyUpdateStats(successes, fromLibrary, notFound);
+        this._spotifyLog(
+          `Conversion complete: ${matchedEntries.length}/${total} placed in "${playlistTitle}" (${successes} new, ${fromLibrary} in library, ${notFound} not found${skipped > 0 ? `, ${skipped} skipped` : ''}).`,
+          'success'
+        );
+        this._spotifySetStatus(`Done: ${matchedEntries.length} of ${total} tracks converted`);
+        if (progLabel) progLabel.textContent = 'Conversion complete';
+        this._toast(`Converted "${playlistTitle}" (${matchedEntries.length} tracks)`);
+
+        if (typeof this.api?.library?.refresh === 'function') {
+          try { await this.api.library.refresh(); } catch (_) {}
+        }
+      } catch (err) {
+        if (err.name === 'AbortError') {
+          this._spotifyLog('Conversion stopped by user.', 'warn');
+          this._spotifySetStatus('Stopped');
+          if (progLabel) progLabel.textContent = 'Conversion stopped';
+        } else {
+          console.error(`${PLUGIN_LABEL} Spotify conversion error:`, err);
+          this._spotifyShowError(err.message);
+          this._spotifyLog(`Conversion error: ${err.message}`, 'error');
+          this._spotifySetStatus('Error');
+          if (progLabel) progLabel.textContent = 'Conversion failed';
+        }
+      } finally {
+        this._spotifyState.isConverting = false;
+        this._spotifyState.abortController = null;
+        if (actionsBar) actionsBar.classList.remove('hidden');
+        if (convertBtn) convertBtn.disabled = this._spotifySelectedIndices.size === 0;
+        if (fixBtn) fixBtn.disabled = this._spotifySelectedIndices.size === 0;
+        if (stopBtn) {
+          stopBtn.disabled = true;
+          stopBtn.classList.add('hidden');
+        }
+        if (fetchBtn) fetchBtn.disabled = false;
+        if (pasteBtn) pasteBtn.disabled = false;
+        if (urlEl && this._spotifyState.sourceKind !== 'json') urlEl.disabled = false;
+        document.querySelectorAll('#ytm-import-modal .ytm-import-tab').forEach(t => { t.disabled = false; });
+        document.querySelectorAll('#ytm-sp-track-list .ytm-sp-track-chk, #ytm-spotify-select-all').forEach(c => { c.disabled = false; });
+      }
+    },
+
+    _stopSpotifyConversion() {
+      if (!this._spotifyState.isConverting) return;
+      this._spotifyState.stopRequested = true;
+      if (this._spotifyState.abortController) {
+        this._spotifyState.abortController.abort();
+      }
+      const stopBtn = document.getElementById('ytm-sp-stop');
+      if (stopBtn) stopBtn.disabled = true;
+      const progLabel = document.getElementById('ytm-sp-prog-label');
+      if (progLabel) progLabel.textContent = 'Stopping…';
+    },
+
     _renderUrlDetectedCard(urlInfo, rawUrl) {
-      const typeLabel = urlInfo.type === 'playlist' ? 'YouTube / YTM Playlist' : urlInfo.type === 'album' ? 'YouTube Music Album' : 'YouTube Song';
-      const btnIcon = urlInfo.type === 'track' ? ICON.play : ICON.import;
-      const btnText = urlInfo.type === 'track' ? 'Play / Inspect Song' : 'Preview & Import Playlist';
+      const isSpotify = urlInfo.type === 'spotify-playlist';
+      const typeLabel = isSpotify
+        ? 'Spotify Playlist'
+        : urlInfo.type === 'playlist'
+          ? 'YouTube / YTM Playlist'
+          : urlInfo.type === 'album'
+            ? 'YouTube Music Album'
+            : 'YouTube Song';
+      const badgeIcon = isSpotify ? ICON.spotify : ICON.link;
+      const badgeLabel = isSpotify ? 'Spotify Link Detected' : 'YouTube Link Detected';
+      const btnIcon = isSpotify ? ICON.sync : (urlInfo.type === 'track' ? ICON.play : ICON.import);
+      const btnText = isSpotify ? 'Preview & Convert Playlist' : (urlInfo.type === 'track' ? 'Play / Inspect Song' : 'Preview & Import Playlist');
+      const cardCls = isSpotify ? 'ytm-url-detected-card spotify' : 'ytm-url-detected-card';
+      const badgeCls = isSpotify ? 'ytm-url-badge spotify' : 'ytm-url-badge';
+      const btnCls = 'ytm-btn ytm-btn-primary';
 
       const wrap = document.createElement('div');
       wrap.innerHTML = `
-        <div class="ytm-url-detected-card">
-          <div class="ytm-url-badge">${ICON.link} YouTube Link Detected</div>
+        <div class="${cardCls}">
+          <div class="${badgeCls}">${badgeIcon} ${badgeLabel}</div>
           <div class="ytm-url-detected-title">${typeLabel}</div>
           <div class="ytm-url-detected-desc">${esc(rawUrl)}</div>
           <div class="ytm-url-detected-actions">
-            <button class="ytm-btn ytm-btn-primary" id="ytm-url-open-btn">
+            <button class="${btnCls}" id="ytm-url-open-btn">
               ${btnIcon} ${btnText}
             </button>
           </div>
@@ -3013,7 +4785,7 @@
       `;
 
       wrap.querySelector('#ytm-url-open-btn').onclick = () => {
-        this._openImportModal(rawUrl);
+        this._openImportModal(rawUrl, isSpotify ? 'spotify' : 'youtube');
       };
 
       this._setContent(wrap);
@@ -3050,6 +4822,9 @@
         document.getElementById('ytm-settings')?.classList.remove('open');
       };
 
+      document.getElementById('ytm-spotify-open').onclick = () => {
+        this._openImportModal('', 'spotify');
+      };
       document.getElementById('ytm-import-open').onclick = () => {
         this._openImportModal();
       };
@@ -3092,6 +4867,12 @@
         clearTimeout(this._searchTimer);
         if (!q) { this._setContent(this._emptyEl(ICON.music, 'Start typing to search…')); return; }
 
+        const spInfo = parseSpotifyUrl(q);
+        if (spInfo && spInfo.type === 'spotify-playlist') {
+          this._renderUrlDetectedCard(spInfo, q);
+          return;
+        }
+
         const urlInfo = parseYouTubeUrl(q);
         if (urlInfo) {
           this._renderUrlDetectedCard(urlInfo, q);
@@ -3104,10 +4885,16 @@
       input?.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') {
           const q = input.value.trim();
+          const spInfo = parseSpotifyUrl(q);
+          if (spInfo && spInfo.type === 'spotify-playlist') {
+            e.preventDefault();
+            this._openImportModal(q, 'spotify');
+            return;
+          }
           const urlInfo = parseYouTubeUrl(q);
           if (urlInfo) {
             e.preventDefault();
-            this._openImportModal(q);
+            this._openImportModal(q, 'youtube');
           }
         }
       });
